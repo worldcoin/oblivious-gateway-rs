@@ -15,6 +15,15 @@ project's behavior are therefore adapted from:
   https://github.com/cloudflare/privacy-gateway-server-go
 
 See LICENSE for this project's license terms (BSD 3-Clause, matching the
-reference implementation above). Third-party Rust crate dependencies retain
-their own licenses; run `cargo license` (or equivalent) before distribution
-to review them.
+reference implementation above).
+
+Third-party Rust crate dependency licenses were reviewed via `cargo
+metadata` against the locked dependency graph (`Cargo.lock`). Every
+dependency declares a permissive license (MIT, Apache-2.0, BSD-2/3-Clause,
+ISC, Zlib, Unicode-3.0, CDLA-Permissive-2.0, BSL-1.0, or Unlicense, in
+various dual/multi-license combinations); none are copyleft. Re-run this
+check after any dependency change:
+
+    cargo metadata --format-version 1 --locked | \
+      jq -r '.packages[] | .license // "UNKNOWN"' | sort | uniq -c
+
