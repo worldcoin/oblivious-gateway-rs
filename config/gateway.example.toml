@@ -1,0 +1,60 @@
+# Example oblivious-gateway-rs configuration.
+#
+# Configuration is loaded once at startup; there is no hot reload. To
+# rotate keys, add a new [[generations]] entry (with `advertise = true`)
+# while keeping the old one loaded (set `advertise = false` once clients
+# have adopted the new generation), then restart.
+
+[server]
+listen_addr = "0.0.0.0:8080"
+gateway_path = "/gateway"
+keys_path = "/ohttp-keys"
+health_path = "/health"
+shutdown_grace_seconds = 30
+
+# Optional incoming TLS. Omit this section to serve plaintext HTTP, e.g.
+# when TLS terminates at an upstream load balancer.
+# [server.tls]
+# cert_file = "/etc/oblivious-gateway/tls/cert.pem"
+# key_file = "/etc/oblivious-gateway/tls/key.pem"
+# # Setting client_ca_file additionally requires and verifies a client
+# # certificate signed by this CA (direct mTLS).
+# client_ca_file = "/etc/oblivious-gateway/tls/client-ca.pem"
+
+# Prometheus metrics are served on their own listener. Omit this section to
+# disable metrics entirely.
+[metrics]
+listen_addr = "127.0.0.1:9090"
+path = "/metrics"
+
+[forwarding]
+# Exact host[:port] allowlist matched against the inner request's Host.
+# Required unless the process is started with --allow-any-target.
+allowed_targets = ["api.example.com", "internal.example.com:8443"]
+
+# Optional scheme/host rewrites applied after the allowlist check, e.g. to
+# route a public hostname to an internal service address.
+[forwarding.rewrites]
+"internal.example.com:8443" = { scheme = "https", host = "internal-service.svc.cluster.local:443" }
+
+# At least one key generation is required. Each generation derives one
+# X25519 key and one X-Wing key from a single master seed; both keys need
+# distinct, stable identifiers. See docs/adr/0001-preserve-x25519-seed-derivation.md
+# for why the X25519 key uses a transformed copy of the seed.
+[[generations]]
+x25519_key_id = 0
+xwing_key_id = 1
+advertise = true
+
+# Seed material should come from an environment variable or a mounted file
+# in production; inline hex seeds are intended for local testing only.
+[generations.seed]
+env = "OBLIVIOUS_GATEWAY_SEED_GEN0"
+
+# Example of a retained-but-not-advertised generation during rotation:
+# [[generations]]
+# x25519_key_id = 2
+# xwing_key_id = 3
+# advertise = false
+# [generations.seed]
+# file = "/run/secrets/oblivious-gateway-seed-gen1"

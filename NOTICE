@@ -1,0 +1,20 @@
+oblivious-gateway-rs
+Copyright (c) 2026, Tools for Humanity
+
+This project is an independent Rust implementation of an Oblivious HTTP
+(RFC 9458) gateway. It does not contain source code copied from Cloudflare's
+`privacy-gateway-server-go`, but its behavior was deliberately modeled on
+that project as a functional reference, and its X25519 key-derivation
+transform is intentionally byte-for-byte compatible with it (see
+`docs/adr/0001-preserve-x25519-seed-derivation.md`). Portions of this
+project's behavior are therefore adapted from:
+
+  privacy-gateway-server-go
+  Copyright (c) 2022, Cloudflare, Inc.
+  Licensed under the BSD 3-Clause License.
+  https://github.com/cloudflare/privacy-gateway-server-go
+
+See LICENSE for this project's license terms (BSD 3-Clause, matching the
+reference implementation above). Third-party Rust crate dependencies retain
+their own licenses; run `cargo license` (or equivalent) before distribution
+to review them.
