@@ -63,11 +63,10 @@ async fn spawn_target() -> SocketAddr {
 }
 
 fn build_app(allowed_targets: Vec<String>) -> axum::Router {
-    let key_ring = KeyRing::load(&test_generations()).unwrap();
-    let forwarding = ForwardingConfig {
-        allowed_targets,
-        rewrites: Default::default(),
-    };
+    build_app_with(KeyRing::load(&test_generations()).unwrap(), allowed_targets)
+}
+
+fn build_app_with_forwarding(key_ring: KeyRing, forwarding: ForwardingConfig) -> axum::Router {
     let forwarder = Forwarder::new(&forwarding, false);
     let state = Arc::new(AppState {
         key_ring,
@@ -82,6 +81,16 @@ fn build_app(allowed_targets: Vec<String>) -> axum::Router {
         tls: None,
     };
     oblivious_gateway::build_router(state, &server_config)
+}
+
+fn build_app_with(key_ring: KeyRing, allowed_targets: Vec<String>) -> axum::Router {
+    build_app_with_forwarding(
+        key_ring,
+        ForwardingConfig {
+            allowed_targets,
+            rewrites: Default::default(),
+        },
+    )
 }
 
 async fn encrypted_gateway_request(
@@ -287,4 +296,194 @@ async fn unknown_route_is_404() {
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+/// A target that always redirects to `landing_authority`, used to exercise
+/// ADR 0002: the allowlist is checked only on the initial destination, and
+/// the redirect is followed without re-validating it.
+async fn spawn_redirecting_target(landing_authority: String) -> SocketAddr {
+    use axum::extract::State;
+    use axum::routing::any;
+    use axum::Router;
+
+    async fn redirect(State(landing): State<String>) -> axum::response::Response {
+        use axum::http::header;
+        use axum::response::IntoResponse;
+
+        (
+            StatusCode::FOUND,
+            [(header::LOCATION, format!("http://{landing}/landed"))],
+        )
+            .into_response()
+    }
+
+    let app = Router::new()
+        .route("/*path", any(redirect))
+        .route("/", any(redirect))
+        .with_state(landing_authority);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    addr
+}
+
+#[tokio::test]
+async fn redirect_target_is_followed_without_reallowlisting() {
+    let landing_addr = spawn_target().await;
+    let landing_authority = landing_addr.to_string();
+    let redirecting_addr = spawn_redirecting_target(landing_authority.clone()).await;
+    let redirecting_authority = redirecting_addr.to_string();
+
+    let key_ring = KeyRing::load(&test_generations()).unwrap();
+    let x25519_config = key_config_for(&key_ring, 0);
+
+    // Only the redirecting host is allowlisted; the landing host is not.
+    let app = build_app(vec![redirecting_authority.clone()]);
+    let (status, response_bytes) = encrypted_gateway_request(
+        app,
+        &x25519_config,
+        "GET",
+        "/start",
+        b"",
+        &redirecting_authority,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (inner_status, inner_body) = decode_bhttp_response(&response_bytes);
+    assert_eq!(
+        inner_status, 200,
+        "the redirect must be followed, not blocked"
+    );
+    assert_eq!(String::from_utf8_lossy(&inner_body), "/landed:");
+}
+
+#[tokio::test]
+async fn rewrite_routes_request_to_configured_target() {
+    let real_target = spawn_target().await;
+    let real_authority = real_target.to_string();
+
+    let key_ring = KeyRing::load(&test_generations()).unwrap();
+    let x25519_config = key_config_for(&key_ring, 0);
+
+    let mut rewrites = std::collections::HashMap::new();
+    rewrites.insert(
+        "public.example.invalid".to_string(),
+        oblivious_gateway::config::RewriteTarget {
+            scheme: "http".to_string(),
+            host: real_authority.clone(),
+        },
+    );
+    let app = build_app_with_forwarding(
+        key_ring,
+        ForwardingConfig {
+            allowed_targets: vec!["public.example.invalid".to_string()],
+            rewrites,
+        },
+    );
+
+    let (status, response_bytes) = encrypted_gateway_request(
+        app,
+        &x25519_config,
+        "GET",
+        "/via-rewrite",
+        b"",
+        "public.example.invalid",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (inner_status, inner_body) = decode_bhttp_response(&response_bytes);
+    assert_eq!(inner_status, 200);
+    assert_eq!(String::from_utf8_lossy(&inner_body), "/via-rewrite:");
+}
+
+#[tokio::test]
+async fn decrypt_only_generation_still_decrypts_but_is_not_advertised() {
+    let target_addr = spawn_target().await;
+    let authority = target_addr.to_string();
+
+    let generations = vec![
+        GenerationConfig {
+            x25519_key_id: 0,
+            xwing_key_id: 1,
+            advertise: true,
+            seed: SeedSource::Hex(SEED_HEX.to_string()),
+        },
+        GenerationConfig {
+            x25519_key_id: 2,
+            xwing_key_id: 3,
+            advertise: false,
+            seed: SeedSource::Hex(
+                "202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f".to_string(),
+            ),
+        },
+    ];
+    let key_ring = KeyRing::load(&generations).unwrap();
+    assert_eq!(key_ring.loaded_key_count(), 4);
+
+    // The retired generation's key is not in the advertised list...
+    let advertised = ohttp::KeyConfig::decode_list(key_ring.advertised_configs()).unwrap();
+    assert_eq!(advertised.len(), 2);
+    assert!(advertised.iter().all(|c| {
+        let id = c.encode().unwrap()[0];
+        id == 0 || id == 1
+    }));
+
+    // ...but a client that already holds its (out-of-band-distributed)
+    // public config can still successfully decrypt through it.
+    let mut retired_seed =
+        hex::decode("202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f").unwrap();
+    if let Some(last) = retired_seed.last_mut() {
+        *last ^= 0xFF;
+    }
+    let retired_config = ohttp::KeyConfig::derive(
+        2,
+        ohttp::hpke::Kem::X25519Sha256,
+        vec![ohttp::SymmetricSuite::new(
+            ohttp::hpke::Kdf::HkdfSha256,
+            ohttp::hpke::Aead::Aes128Gcm,
+        )],
+        &retired_seed,
+    )
+    .unwrap()
+    .encode()
+    .unwrap();
+
+    let app = build_app_with(key_ring, vec![authority.clone()]);
+    let (status, response_bytes) =
+        encrypted_gateway_request(app, &retired_config, "GET", "/", b"", &authority).await;
+    assert_eq!(status, StatusCode::OK);
+    let (inner_status, _) = decode_bhttp_response(&response_bytes);
+    assert_eq!(inner_status, 200);
+}
+
+#[tokio::test]
+async fn malformed_inner_bhttp_is_encrypted_400() {
+    let key_ring = KeyRing::load(&test_generations()).unwrap();
+    let x25519_config = key_config_for(&key_ring, 0);
+    let app = build_app_with(key_ring, vec!["example.invalid".to_string()]);
+
+    let client = ClientRequest::from_encoded_config(&x25519_config).unwrap();
+    let (enc_request, client_response) = client.encapsulate(b"not a valid bhttp message").unwrap();
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/gateway")
+                .header("content-type", "message/ohttp-req")
+                .body(Body::from(enc_request))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK, "outer status stays 200");
+    let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let decrypted = client_response.decapsulate(&body_bytes).unwrap();
+    let (inner_status, _) = decode_bhttp_response(&decrypted);
+    assert_eq!(inner_status, 400);
 }
