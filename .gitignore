@@ -3,4 +3,3 @@ Cargo.lock.bak
 *.pem
 *.key
 !/tests/fixtures/tls/*.pem
-/docs
