@@ -65,8 +65,10 @@ non-empty. To run without any target restriction (development only), pass
 
 Unknown routes return 404. `/gateway` errors before decapsulation succeeds
 (bad content type, unreadable body, unknown key ID, decapsulation/
-encapsulation failure) are plaintext outer HTTP errors (400 or 401 for an
-unknown key). Errors after successful decapsulation — malformed inner
+encapsulation failure) are plaintext outer 400s, per RFC 9458 §9.5's
+registered `ohttp-key` problem type — the Go reference returns 401 for an
+unknown key identifier instead, but we follow the RFC's own example here
+rather than Go. Errors after successful decapsulation — malformed inner
 request (400), forbidden target (403), upstream failure (500) — are
 returned *inside* the encrypted response, with the outer HTTP status held
 at 200, matching the Go reference's error model.

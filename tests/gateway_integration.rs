@@ -200,6 +200,8 @@ async fn forbidden_target_returns_encrypted_403() {
 
 #[tokio::test]
 async fn unknown_key_id_is_outer_error() {
+    // 400, per RFC 9458 §9.5's registered `ohttp-key` problem type and its
+    // own example (not the Go reference's 401).
     let app = build_app(vec!["example.invalid".to_string()]);
     let response = app
         .oneshot(
@@ -212,7 +214,7 @@ async fn unknown_key_id_is_outer_error() {
         )
         .await
         .unwrap();
-    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]

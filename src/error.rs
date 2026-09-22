@@ -6,7 +6,13 @@
 use thiserror::Error;
 
 /// A failure while producing or validating the OHTTP encapsulation itself.
-/// These map to a plaintext outer HTTP error, matching the Go gateway.
+/// These map to a plaintext outer HTTP error.
+///
+/// Status codes follow RFC 9458 rather than the Go reference: an unknown
+/// key identifier is a 400, per the RFC's registered `ohttp-key` problem
+/// type and its own example (RFC 9458 §9.5, §5.3 Figure 7) — not the Go
+/// gateway's 401. See `docs/CONTEXT.md` for the rest of the terminology
+/// this project aligns to RFC 9458.
 #[derive(Debug, Error)]
 pub enum OuterError {
     #[error("unsupported content type")]
@@ -22,13 +28,13 @@ pub enum OuterError {
 }
 
 impl OuterError {
-    /// Outer HTTP status code, matching the Go gateway's mapping.
+    /// Outer HTTP status code. Every current variant is 400; kept as a
+    /// method rather than a constant so a future variant needing a
+    /// different code (e.g. RFC 9458 §6.4's optional 422 for a replaced
+    /// key) doesn't have to change every call site.
     #[must_use]
     pub fn status(&self) -> u16 {
-        match self {
-            Self::ConfigMismatch => 401,
-            _ => 400,
-        }
+        400
     }
 
     #[must_use]
