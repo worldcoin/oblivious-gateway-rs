@@ -6,8 +6,8 @@ This project is an independent Rust implementation of an Oblivious HTTP
 other implementation. It contains no source code copied from Cloudflare's
 `privacy-gateway-server-go`, and its design and feature set have since
 diverged from and in several respects gone beyond it (native X-Wing rather
-than a draft KEM, optional direct mTLS, RFC-9458-aligned status codes,
-hardened outbound URL/Host handling, multi-generation key rotation).
+than a draft KEM, RFC-9458-aligned status codes, hardened outbound URL/Host
+handling, multi-generation key rotation).
 
 One specific behavior is a deliberate, narrow exception: this project's
 X25519 key derivation reproduces `privacy-gateway-server-go`'s legacy

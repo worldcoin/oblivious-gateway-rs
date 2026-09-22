@@ -45,7 +45,7 @@ response with the outer status held at 200, matching Go.
 
 See [`config/gateway.example.toml`](config/gateway.example.toml) for a
 fully commented example: `[server]` (listen address, paths, optional
-`[server.tls]` for HTTPS/mTLS), `[metrics]` (optional), `[forwarding]`
+`[server.tls]` for HTTPS), `[metrics]` (optional), `[forwarding]`
 (`allowed_targets`, optional `rewrites`), and one or more `[[generations]]`.
 
 Each `[[generations]]` entry is one operator-provided secret **seed**
@@ -110,7 +110,7 @@ Tests use only local fixtures (`tests/fixtures/tls/`) and in-process
 targets — no live external services. Covers: the Go-compatible X25519
 fixture, config validation, full X25519/X-Wing round trips, allowlist/
 redirect/rewrite behavior, decrypt-only generations, telemetry, and
-TLS/mTLS accept/reject. Docker image: Debian builder (for `aws-lc-rs`) →
+TLS accept. Docker image: Debian builder (for `aws-lc-rs`) →
 `distroless/cc` nonroot runtime.
 
 ## CI and releases

@@ -17,9 +17,6 @@ shutdown_grace_seconds = 30
 # [server.tls]
 # cert_file = "/etc/oblivious-gateway/tls/cert.pem"
 # key_file = "/etc/oblivious-gateway/tls/key.pem"
-# # Setting client_ca_file additionally requires and verifies a client
-# # certificate signed by this CA (direct mTLS).
-# client_ca_file = "/etc/oblivious-gateway/tls/client-ca.pem"
 
 # Prometheus metrics are served on their own listener. Omit this section to
 # disable metrics entirely.

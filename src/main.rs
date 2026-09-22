@@ -100,7 +100,7 @@ async fn run() -> Result<(), StartupError> {
 
     if let Some(tls_config) = &file_config.server.tls {
         let rustls_config = tls::build(tls_config)?;
-        tracing::info!(%addr, mtls = tls_config.client_ca_file.is_some(), "listening (TLS)");
+        tracing::info!(%addr, "listening (TLS)");
         axum_server::bind_rustls(addr, rustls_config)
             .handle(handle)
             .serve(app.into_make_service())

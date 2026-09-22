@@ -9,7 +9,7 @@ use serde::Deserialize;
 
 use crate::error::StartupError;
 
-/// Minimum seed length, matching the Go reference's `defaultSeedLength`
+/// Minimum seed length
 /// (32 bytes: as many bits of entropy as an X25519 secret key).
 pub const MIN_SEED_LEN: usize = 32;
 
@@ -78,11 +78,6 @@ pub struct TlsConfig {
     pub cert_file: String,
     /// Path to the PEM-encoded server private key.
     pub key_file: String,
-    /// When set, incoming connections must present a certificate signed by
-    /// this CA (direct mTLS). This extends the Go reference, which has no
-    /// client-certificate configuration.
-    #[serde(default)]
-    pub client_ca_file: Option<String>,
 }
 
 /// `[metrics]`: the separate Prometheus scrape listener.
@@ -102,7 +97,7 @@ pub struct MetricsConfig {
 #[derive(Debug, Deserialize, Default)]
 pub struct ForwardingConfig {
     /// Exact `host[:port]` allowlist, matched against the binary HTTP
-    /// request's Host, matching the Go reference's `req.Host` comparison.
+    /// request's Host.
     /// Required to be non-empty unless the process is started with
     /// `--allow-any-target`.
     #[serde(default)]
@@ -142,7 +137,7 @@ pub struct GenerationConfig {
     /// (or omit its `key_id`) to derive it from the X25519 Key Identifier
     /// — see [`GenerationConfig::xwing_key_id`].
     #[serde(default)]
-    pub xwing: Option<KemSlot>,
+    pub xwing: KemSlot,
     /// Whether this generation's public Key Configurations appear in
     /// `/ohttp-keys`. Every loaded generation can still decrypt regardless
     /// of this flag; setting it to `false` supports decrypt-only rotation.
@@ -190,12 +185,9 @@ impl GenerationConfig {
     /// would be.
     #[must_use]
     pub fn xwing_key_id(&self) -> u8 {
-        match &self.xwing {
-            Some(slot) => slot
-                .key_id
-                .unwrap_or_else(|| self.x25519_key_id().wrapping_add(128)),
-            None => self.x25519_key_id().wrapping_add(128),
-        }
+        self.xwing
+            .key_id
+            .unwrap_or_else(|| self.x25519_key_id().wrapping_add(128))
     }
 }
 
@@ -246,7 +238,7 @@ impl FileConfig {
     /// parsed, or if it fails validation (duplicate key IDs, an empty
     /// generation list, colliding endpoint paths). Returns
     /// [`StartupError::Tls`] if `[server.tls]` references a missing
-    /// certificate, key, or client CA file.
+    /// certificate or key file.
     pub fn load(path: &Path) -> Result<Self, StartupError> {
         let raw = fs::read_to_string(path)?;
         let config: Self = toml::from_str(&raw)
@@ -305,11 +297,6 @@ impl FileConfig {
                     "key_file not found: {}",
                     tls.key_file
                 )));
-            }
-            if let Some(ca) = &tls.client_ca_file {
-                if !Path::new(ca).is_file() {
-                    return Err(StartupError::Tls(format!("client_ca_file not found: {ca}")));
-                }
             }
         }
 

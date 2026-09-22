@@ -28,7 +28,7 @@ async fn gateway_request_updates_prometheus_counters() {
 
     let key_ring = KeyRing::load(&[GenerationConfig {
         x25519: KemSlot { key_id: Some(0) },
-        xwing: Some(KemSlot { key_id: Some(1) }),
+        xwing: KemSlot { key_id: Some(1) },
         advertise: true,
         seed: SeedSource::Hex(SEED_HEX.to_string()),
     }])

@@ -1,14 +1,11 @@
-//! Incoming TLS acceptance and rejection, including optional direct mTLS:
-//! configuring a client CA requires a verified client certificate. Uses
-//! the self-signed fixtures under `tests/fixtures/tls/`, generated once
-//! for local testing only.
+//! Incoming TLS acceptance. Uses the self-signed fixtures under
+//! `tests/fixtures/tls/`, generated once for local testing only.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
 
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
-use rustls::pki_types::pem::PemObject;
-use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName, UnixTime};
+use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
 use rustls::{ClientConfig, SignatureScheme};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio_rustls::TlsConnector;
@@ -70,24 +67,13 @@ impl ServerCertVerifier for AcceptAnyServerCert {
     }
 }
 
-fn load_certs(path: &str) -> Vec<CertificateDer<'static>> {
-    CertificateDer::pem_file_iter(path)
-        .unwrap()
-        .collect::<Result<Vec<_>, _>>()
-        .unwrap()
-}
-
-fn load_key(path: &str) -> PrivateKeyDer<'static> {
-    PrivateKeyDer::from_pem_file(path).unwrap()
-}
-
 async fn start_gateway_tls(tls_config: &TlsConfig) -> SocketAddr {
     let rustls_config = oblivious_gateway::tls::build(tls_config).unwrap();
 
     let key_ring =
         oblivious_gateway::keys::KeyRing::load(&[oblivious_gateway::config::GenerationConfig {
             x25519: oblivious_gateway::config::KemSlot { key_id: Some(0) },
-            xwing: Some(oblivious_gateway::config::KemSlot { key_id: Some(1) }),
+            xwing: oblivious_gateway::config::KemSlot { key_id: Some(1) },
             advertise: true,
             seed: oblivious_gateway::config::SeedSource::Hex(
                 "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f".to_string(),
@@ -129,21 +115,12 @@ async fn start_gateway_tls(tls_config: &TlsConfig) -> SocketAddr {
     handle.listening().await.unwrap()
 }
 
-async fn attempt_handshake(
-    addr: SocketAddr,
-    client_identity: Option<(&str, &str)>,
-) -> Result<(), String> {
+async fn attempt_handshake(addr: SocketAddr) -> Result<(), String> {
     let root_verifier = Arc::new(AcceptAnyServerCert);
-    let builder = ClientConfig::builder()
+    let config = ClientConfig::builder()
         .dangerous()
-        .with_custom_certificate_verifier(root_verifier);
-
-    let config = match client_identity {
-        Some((cert_path, key_path)) => builder
-            .with_client_auth_cert(load_certs(cert_path), load_key(key_path))
-            .map_err(|e| e.to_string())?,
-        None => builder.with_no_client_auth(),
-    };
+        .with_custom_certificate_verifier(root_verifier)
+        .with_no_client_auth();
 
     let connector = TlsConnector::from(Arc::new(config));
     let tcp = tokio::net::TcpStream::connect(addr)
@@ -179,63 +156,9 @@ async fn plain_tls_accepts_connection_without_client_cert() {
     let tls_config = TlsConfig {
         cert_file: fixture("server-cert.pem"),
         key_file: fixture("server-key.pem"),
-        client_ca_file: None,
     };
     let addr = start_gateway_tls(&tls_config).await;
-    attempt_handshake(addr, None)
+    attempt_handshake(addr)
         .await
         .expect("plain TLS should accept a client with no certificate");
-}
-
-#[tokio::test]
-async fn mtls_rejects_connection_without_client_cert() {
-    let tls_config = TlsConfig {
-        cert_file: fixture("server-cert.pem"),
-        key_file: fixture("server-key.pem"),
-        client_ca_file: Some(fixture("client-ca-cert.pem")),
-    };
-    let addr = start_gateway_tls(&tls_config).await;
-    let result = attempt_handshake(addr, None).await;
-    assert!(
-        result.is_err(),
-        "mTLS must reject a client presenting no certificate"
-    );
-}
-
-#[tokio::test]
-async fn mtls_rejects_untrusted_client_cert() {
-    let tls_config = TlsConfig {
-        cert_file: fixture("server-cert.pem"),
-        key_file: fixture("server-key.pem"),
-        client_ca_file: Some(fixture("client-ca-cert.pem")),
-    };
-    let addr = start_gateway_tls(&tls_config).await;
-    let result = attempt_handshake(
-        addr,
-        Some((
-            &fixture("untrusted-client-cert.pem"),
-            &fixture("untrusted-client-key.pem"),
-        )),
-    )
-    .await;
-    assert!(
-        result.is_err(),
-        "mTLS must reject a client certificate not signed by the configured CA"
-    );
-}
-
-#[tokio::test]
-async fn mtls_accepts_trusted_client_cert() {
-    let tls_config = TlsConfig {
-        cert_file: fixture("server-cert.pem"),
-        key_file: fixture("server-key.pem"),
-        client_ca_file: Some(fixture("client-ca-cert.pem")),
-    };
-    let addr = start_gateway_tls(&tls_config).await;
-    attempt_handshake(
-        addr,
-        Some((&fixture("client-cert.pem"), &fixture("client-key.pem"))),
-    )
-    .await
-    .expect("mTLS should accept a client certificate signed by the configured CA");
 }
