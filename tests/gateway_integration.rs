@@ -9,6 +9,7 @@ use std::sync::Arc;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use ohttp::ClientRequest;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tower::ServiceExt;
 
 use oblivious_gateway::config::{ForwardingConfig, GenerationConfig, SeedSource};
@@ -519,6 +520,64 @@ async fn crafted_path_cannot_bypass_allowlist_or_override_rewrite() {
             assert_eq!(decode_bhttp_response(&response).0, 400);
         }
     }
+}
+
+/// A client-supplied `Host` header must never reach the target verbatim:
+/// the TCP destination is already locked to the allowlisted authority, but
+/// forwarding an attacker-chosen `Host` on top of that connection would
+/// let them request a different virtual host on a multi-tenant target than
+/// the one the operator actually allowlisted.
+#[tokio::test]
+async fn spoofed_host_header_is_not_forwarded_to_target() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let authority = listener.local_addr().unwrap().to_string();
+    let captured = tokio::spawn(async move {
+        let (mut connection, _) = listener.accept().await.unwrap();
+        let mut request = Vec::new();
+        let mut chunk = [0u8; 1024];
+        loop {
+            let n = connection.read(&mut chunk).await.unwrap();
+            request.extend_from_slice(&chunk[..n]);
+            if request.windows(4).any(|w| w == b"\r\n\r\n") || n == 0 {
+                break;
+            }
+        }
+        connection
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+            .await
+            .unwrap();
+        String::from_utf8_lossy(&request).into_owned()
+    });
+
+    let key_ring = KeyRing::load(&test_generations()).unwrap();
+    let key_config = key_config_for(&key_ring, 0);
+    let app = build_app(vec![authority.clone()]);
+
+    let mut message = bhttp::Message::request(
+        b"GET".to_vec(),
+        b"http".to_vec(),
+        authority.as_bytes().to_vec(),
+        b"/".to_vec(),
+    );
+    message.put_header(b"Host".to_vec(), b"evil-vhost.example".to_vec());
+    let (outer_status, response) =
+        encrypted_binary_gateway_request(app, &key_config, &message).await;
+    assert_eq!(outer_status, StatusCode::OK);
+    assert_eq!(decode_bhttp_response(&response).0, 200);
+
+    let raw_request = captured.await.unwrap();
+    assert!(
+        !raw_request.to_ascii_lowercase().contains("evil-vhost"),
+        "spoofed Host header reached the target:\n{raw_request}"
+    );
+    let host_line = raw_request
+        .lines()
+        .find(|line| line.to_ascii_lowercase().starts_with("host:"))
+        .expect("request must carry a Host header");
+    assert!(
+        host_line.contains(&authority),
+        "Host header should be the resolved target, got: {host_line}"
+    );
 }
 
 #[tokio::test]

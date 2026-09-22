@@ -44,7 +44,9 @@ pub struct BinaryHttpRequest {
     pub authority: String,
     /// Request path, including any query string.
     pub path: String,
-    /// Request headers, with hop-by-hop headers already stripped.
+    /// Request headers, with hop-by-hop headers and any client-supplied
+    /// `Host` header already stripped (the outbound request always gets
+    /// its `Host` from the resolved target, never from the client).
     pub headers: HeaderMap,
     /// Request body.
     pub body: Vec<u8>,
@@ -83,6 +85,7 @@ pub fn decode_request(bytes: &[u8]) -> Result<BinaryHttpRequest, PayloadError> {
         .unwrap_or_else(|| "/".to_string());
 
     let mut headers = HeaderMap::new();
+    let mut host_header_values: Vec<HeaderValue> = Vec::new();
     for field in message.header().iter() {
         // RFC 9458 §5.1 forbids this handshake inside an encapsulated request.
         // Check before removing connection-specific fields.
@@ -99,6 +102,19 @@ pub fn decode_request(bytes: &[u8]) -> Result<BinaryHttpRequest, PayloadError> {
         }
         let name = HeaderName::from_bytes(field.name()).map_err(|_| PayloadError::Malformed)?;
         let value = HeaderValue::from_bytes(field.value()).map_err(|_| PayloadError::Malformed)?;
+        // Never forward the client's own Host header: the outbound request
+        // always goes to the (allowlist-checked) authority/rewrite target,
+        // and letting a client-supplied Host reach the target verbatim
+        // would let it request a different virtual host than the one the
+        // operator actually allowlisted, even though the TCP destination is
+        // correct. `reqwest`/hyper set the wire Host header from the
+        // request URL when none is explicitly provided, which is what we
+        // want here. Collected separately for the origin-form fallback
+        // below, not appended to `headers`.
+        if name == reqwest::header::HOST {
+            host_header_values.push(value);
+            continue;
+        }
         headers.append(name, value);
     }
 
@@ -106,7 +122,7 @@ pub fn decode_request(bytes: &[u8]) -> Result<BinaryHttpRequest, PayloadError> {
     let authority = match authority {
         Some(authority) => authority,
         None => {
-            let mut hosts = headers.get_all(reqwest::header::HOST).iter();
+            let mut hosts = host_header_values.iter();
             let host = hosts
                 .next()
                 .ok_or(PayloadError::Malformed)?
