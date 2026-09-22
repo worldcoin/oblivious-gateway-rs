@@ -124,8 +124,7 @@ pub enum StartupError {
     /// A seed or derived key was missing, unreadable, or invalid.
     #[error("key material error: {0}")]
     Key(String),
-    /// A `[server.tls]` certificate, key, or client CA file was missing or
-    /// invalid.
+    /// A `[server.tls]` certificate or key file was missing or invalid.
     #[error("TLS configuration error: {0}")]
     Tls(String),
     /// Reading the configuration file itself failed.

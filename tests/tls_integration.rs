@@ -152,7 +152,7 @@ async fn attempt_handshake(addr: SocketAddr) -> Result<(), String> {
 }
 
 #[tokio::test]
-async fn plain_tls_accepts_connection_without_client_cert() {
+async fn https_health_endpoint_responds() {
     let tls_config = TlsConfig {
         cert_file: fixture("server-cert.pem"),
         key_file: fixture("server-key.pem"),
@@ -160,5 +160,5 @@ async fn plain_tls_accepts_connection_without_client_cert() {
     let addr = start_gateway_tls(&tls_config).await;
     attempt_handshake(addr)
         .await
-        .expect("plain TLS should accept a client with no certificate");
+        .expect("HTTPS health endpoint should respond successfully");
 }

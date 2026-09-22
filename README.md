@@ -39,7 +39,7 @@ Unknown routes → 404. Pre-decryption failures are plaintext outer 400s
 (RFC 9458 §9.5's `ohttp-key` problem type — not the Go reference's 401 for
 an unknown key). Post-decryption failures (malformed request 400,
 forbidden target 403, upstream failure 500) are inside the encrypted
-response with the outer status held at 200, matching Go.
+response with the outer status held at 200.
 
 ## Configuration
 
@@ -59,8 +59,7 @@ select which key a request was encrypted against, not derived from the
 seed itself.
 
 Both key IDs have sensible defaults so the common case needs neither set:
-`x25519` defaults to `0` (matching the Go reference's own default for its
-one operator-facing key ID), and `xwing` defaults to the X25519 ID + 128,
+`x25519` defaults to `0`, and `xwing` defaults to the X25519 ID + 128,
 wrapping (the same shape as Go's own primary/legacy key-ID pairing). A
 second generation can't rely on the same `x25519` default — it would
 collide with the first's — so startup validation forces later generations
@@ -129,12 +128,11 @@ action (same pattern as `world-chain-rundler`).
 
 ## Known limitations
 
-- **Body size**: axum's `Bytes` extractor caps requests at 2 MiB
-  (stricter than Go, which has no cap).
+- **Body size**: axum's `Bytes` extractor caps requests at 2 MiB.
 - **Outbound timeouts**: hardcoded 10s connect / 30s request timeout
   (`src/forward.rs`) — a deliberate departure from "use library defaults"
   to avoid unbounded resource exhaustion. Not yet operator-configurable.
-  Inbound listener still has none, matching Go.
+  Inbound listener still has none.
 - **Redirects trusted**: allowlist checked only on the initial
   destination (deliberate — see `GLOSSARY.md`); an allowed target can
   redirect anywhere, including internal addresses.
@@ -147,10 +145,7 @@ action (same pattern as `world-chain-rundler`).
 - **Advisory scanning is soft-gated** — `cargo deny check advisories` runs
   in CI but `continue-on-error`, so a new RUSTSEC entry is visible but
   doesn't block merges (licenses/bans/sources are hard-gated).
-- **No outbound response size cap** — full target response is buffered
-  before re-encoding, matching Go.
 
 ## License
 
-BSD-3-Clause. See `LICENSE` and `NOTICE` (relationship to the Go reference
-and the dependency license review).
+BSD-3-Clause. See `LICENSE` and `NOTICE`

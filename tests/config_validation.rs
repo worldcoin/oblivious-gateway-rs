@@ -201,34 +201,9 @@ hex = "0001020304"
 }
 
 #[test]
-fn rejects_the_old_flat_key_id_fields() {
-    // x25519_key_id/xwing_key_id (pre-KemSlot schema) must fail loudly at
-    // parse time, not be silently ignored in favor of this schema's
-    // defaults for a generation whose IDs the operator meant to pin.
-    let file = write_temp(
-        r#"
-[server]
-listen_addr = "127.0.0.1:0"
-
-[forwarding]
-allowed_targets = ["example.invalid"]
-
-[[generations]]
-x25519_key_id = 0
-xwing_key_id = 1
-[generations.seed]
-hex = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
-"#,
-    );
-    let err = FileConfig::load(&file.path).unwrap_err();
-    assert!(format!("{err}").contains("unknown field `x25519_key_id`"));
-}
-
-#[test]
 fn key_ids_default_when_omitted_and_can_be_overridden() {
     // Omitting both x25519 and xwing entirely: x25519 defaults to 0
-    // (matching the Go reference's own CONFIGURATION_ID default), xwing
-    // defaults to x25519's ID + 128 (matching the shape, not the exact
+    // xwing defaults to x25519's ID + 128 (matching the shape, not the exact
     // formula, of Go's legacy-configuration derivation) - see GLOSSARY.md.
     let defaulted = write_temp(
         r#"

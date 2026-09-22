@@ -50,7 +50,7 @@ fn outer_error(metrics: &mut RequestMetrics, err: OuterError) -> Response {
 /// response back to binary HTTP, and encapsulate it as the Encapsulated
 /// Response. Errors before decapsulation succeeds are plaintext outer
 /// errors; errors afterwards are carried inside the encrypted response with
-/// the outer status held at 200, matching the Go reference.
+/// the outer status held at 200
 pub async fn gateway_handler(State(state): State<Arc<AppState>>, request: Request) -> Response {
     let mut metrics = RequestMetrics::start("gateway");
     let (parts, body) = request.into_parts();

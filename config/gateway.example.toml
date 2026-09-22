@@ -45,8 +45,7 @@ allowed_targets = ["api.example.com", "internal.example.com:8443"]
 # environment variable name, or a file path, e.g. `seed = { file = "/run/secrets/..." }`.
 #
 # `x25519`/`xwing` are both optional. Omit `x25519` (or its `key_id`) to
-# default to key ID 0 - matching the Go reference's own default for its
-# one operator-facing key ID (`CONFIGURATION_ID`, also defaulting to 0).
+# default to key ID 0.
 # Omit `xwing` (or its `key_id`) to derive it from the X25519 key ID by
 # adding 128 (wrapping) - the same shape as Go's own legacy-configuration
 # derivation (`(configID - 128) % 255`), generalized to a per-generation

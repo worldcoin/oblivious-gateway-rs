@@ -102,8 +102,7 @@ pub struct ForwardingConfig {
     /// `--allow-any-target`.
     #[serde(default)]
     pub allowed_targets: Vec<String>,
-    /// Scheme/host rewrites applied after the allowlist check, matching the
-    /// Go reference's `TARGET_REWRITES`.
+    /// Scheme/host rewrites applied after the allowlist check
     #[serde(default)]
     pub rewrites: std::collections::HashMap<String, RewriteTarget>,
 }
@@ -120,11 +119,6 @@ pub struct RewriteTarget {
 
 /// One `[[generations]]` entry: a Key Generation (see `GLOSSARY.md`) —
 /// one X25519 key and one X-Wing key derived from a single master seed.
-///
-/// `deny_unknown_fields`: an older config using the flat `x25519_key_id`/
-/// `xwing_key_id` fields this schema replaced must fail loudly at parse
-/// time, not silently fall back to this schema's defaults for a generation
-/// whose IDs the operator actually meant to pin.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GenerationConfig {

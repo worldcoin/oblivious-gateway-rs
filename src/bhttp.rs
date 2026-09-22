@@ -2,9 +2,7 @@
 //! message" (RFC 9458 §4.1's own phrase for what an Encapsulated Request
 //! protects) and ordinary HTTP as understood by `reqwest`.
 //!
-//! Known-length framing is used on both directions, matching the Go
-//! reference's `ohttp.UnmarshalBinaryRequest` / `ohttp.CreateBinaryResponse`,
-//! which also use RFC 9292's known-length message format.
+//! Known-length framing is used on both directions using RFC 9292's known-length message format.
 
 use std::io::Cursor;
 
