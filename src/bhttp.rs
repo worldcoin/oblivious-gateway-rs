@@ -1,5 +1,6 @@
-//! Binary HTTP (RFC 9292) translation between the decapsulated inner
-//! request/response and ordinary HTTP as understood by `reqwest`.
+//! Binary HTTP (RFC 9292) translation between "a binary HTTP request
+//! message" (RFC 9458 §4.1's own phrase for what an Encapsulated Request
+//! protects) and ordinary HTTP as understood by `reqwest`.
 //!
 //! Known-length framing is used on both directions, matching the Go
 //! reference's `ohttp.UnmarshalBinaryRequest` / `ohttp.CreateBinaryResponse`,
@@ -32,8 +33,9 @@ fn is_hop_by_hop(name: &[u8]) -> bool {
         .any(|h| h.as_bytes().eq_ignore_ascii_case(name))
 }
 
-/// A plain HTTP request decoded from an inner BHTTP message.
-pub struct InnerRequest {
+/// The binary HTTP request message (RFC 9458 §4.1) that an Encapsulated
+/// Request protects, decoded into its ordinary-HTTP parts.
+pub struct BinaryHttpRequest {
     pub method: Method,
     pub scheme: String,
     pub authority: String,
@@ -44,7 +46,7 @@ pub struct InnerRequest {
 
 /// Decode a known-length BHTTP request, matching RFC 9292 §3.3 / Go's
 /// `ohttp.UnmarshalBinaryRequest`.
-pub fn decode_request(bytes: &[u8]) -> Result<InnerRequest, PayloadError> {
+pub fn decode_request(bytes: &[u8]) -> Result<BinaryHttpRequest, PayloadError> {
     let mut cursor = Cursor::new(bytes);
     let message = Message::read_bhttp(&mut cursor).map_err(|_| PayloadError::Malformed)?;
 
@@ -78,7 +80,7 @@ pub fn decode_request(bytes: &[u8]) -> Result<InnerRequest, PayloadError> {
         headers.append(name, value);
     }
 
-    Ok(InnerRequest {
+    Ok(BinaryHttpRequest {
         method,
         scheme,
         authority,

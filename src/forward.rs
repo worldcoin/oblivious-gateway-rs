@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use reqwest::{Client, Method};
 
-use crate::bhttp::InnerRequest;
+use crate::bhttp::BinaryHttpRequest;
 use crate::config::{ForwardingConfig, RewriteTarget};
 use crate::error::PayloadError;
 
@@ -58,39 +58,39 @@ impl Forwarder {
         }
     }
 
-    async fn send(&self, inner: &InnerRequest) -> Result<reqwest::Response, PayloadError> {
+    async fn send(&self, request: &BinaryHttpRequest) -> Result<reqwest::Response, PayloadError> {
         if let Some(allowed) = &self.allowed_targets {
-            if !allowed.contains(&inner.authority) {
+            if !allowed.contains(&request.authority) {
                 return Err(PayloadError::Forbidden);
             }
         }
 
-        let (scheme, host) = match self.rewrites.get(&inner.authority) {
+        let (scheme, host) = match self.rewrites.get(&request.authority) {
             Some(rewrite) => (rewrite.scheme.clone(), rewrite.host.clone()),
             None => (
-                if inner.scheme.is_empty() {
+                if request.scheme.is_empty() {
                     "https".to_string()
                 } else {
-                    inner.scheme.clone()
+                    request.scheme.clone()
                 },
-                inner.authority.clone(),
+                request.authority.clone(),
             ),
         };
 
-        let url = format!("{scheme}://{host}{}", inner.path);
-        let method = Method::from_bytes(inner.method.as_str().as_bytes())
+        let url = format!("{scheme}://{host}{}", request.path);
+        let method = Method::from_bytes(request.method.as_str().as_bytes())
             .map_err(|_| PayloadError::Malformed)?;
 
-        let request = self
+        let outbound_request = self
             .client
             .request(method, &url)
-            .headers(inner.headers.clone())
-            .body(inner.body.clone());
+            .headers(request.headers.clone())
+            .body(request.body.clone());
 
-        request.send().await.map_err(|err| {
+        outbound_request.send().await.map_err(|err| {
             tracing::warn!(
                 error = %err,
-                authority = %inner.authority,
+                authority = %request.authority,
                 timed_out = err.is_timeout(),
                 is_connect = err.is_connect(),
                 "target request failed"
@@ -99,17 +99,17 @@ impl Forwarder {
         })
     }
 
-    /// Forward the decapsulated request to its target, returning the
+    /// Forward the binary HTTP request to its target, returning the
     /// upstream status, headers and body on success.
     pub async fn forward(
         &self,
-        inner: &InnerRequest,
+        request: &BinaryHttpRequest,
     ) -> Result<(u16, reqwest::header::HeaderMap, Vec<u8>), PayloadError> {
-        let response = self.send(inner).await?;
+        let response = self.send(request).await?;
         let status = response.status().as_u16();
         let headers = response.headers().clone();
         let body = response.bytes().await.map_err(|err| {
-            tracing::warn!(error = %err, authority = %inner.authority, "reading target response body failed");
+            tracing::warn!(error = %err, authority = %request.authority, "reading target response body failed");
             PayloadError::TargetFailed
         })?;
         Ok((status, headers, body.to_vec()))

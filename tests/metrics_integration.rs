@@ -71,11 +71,11 @@ async fn gateway_request_updates_prometheus_counters() {
         b"example.invalid".to_vec(),
         b"/".to_vec(),
     );
-    let mut inner = Vec::new();
+    let mut binary_request_bytes = Vec::new();
     bhttp_msg
-        .write_bhttp(bhttp::Mode::KnownLength, &mut inner)
+        .write_bhttp(bhttp::Mode::KnownLength, &mut binary_request_bytes)
         .unwrap();
-    let (enc_request, _client_response) = client.encapsulate(&inner).unwrap();
+    let (enc_request, _client_response) = client.encapsulate(&binary_request_bytes).unwrap();
 
     let response = app
         .oneshot(

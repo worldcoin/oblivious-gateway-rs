@@ -78,8 +78,8 @@ pub struct MetricsConfig {
 
 #[derive(Debug, Deserialize, Default)]
 pub struct ForwardingConfig {
-    /// Exact `host[:port]` allowlist, matched against the inner request's
-    /// Host, matching the Go reference's `req.Host` comparison.
+    /// Exact `host[:port]` allowlist, matched against the binary HTTP
+    /// request's Host, matching the Go reference's `req.Host` comparison.
     #[serde(default)]
     pub allowed_targets: Vec<String>,
     /// Scheme/host rewrites applied after the allowlist check, matching the

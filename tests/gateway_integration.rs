@@ -109,12 +109,12 @@ async fn encrypted_gateway_request(
         path.as_bytes().to_vec(),
     );
     bhttp_msg.write_content(body);
-    let mut inner = Vec::new();
+    let mut binary_request_bytes = Vec::new();
     bhttp_msg
-        .write_bhttp(bhttp::Mode::KnownLength, &mut inner)
+        .write_bhttp(bhttp::Mode::KnownLength, &mut binary_request_bytes)
         .unwrap();
 
-    let (enc_request, client_response) = client.encapsulate(&inner).unwrap();
+    let (enc_request, client_response) = client.encapsulate(&binary_request_bytes).unwrap();
 
     let response = app
         .oneshot(
@@ -174,9 +174,9 @@ async fn allowed_target_round_trip_x25519_and_xwing() {
             encrypted_gateway_request(app, &config_bytes, "GET", "/hello", b"", &authority).await;
         assert_eq!(status, StatusCode::OK, "outer status for {label}");
 
-        let (inner_status, inner_body) = decode_bhttp_response(&response_bytes);
-        assert_eq!(inner_status, 200, "inner status for {label}");
-        assert_eq!(String::from_utf8_lossy(&inner_body), "/hello:");
+        let (binary_status, binary_body) = decode_bhttp_response(&response_bytes);
+        assert_eq!(binary_status, 200, "binary HTTP status for {label}");
+        assert_eq!(String::from_utf8_lossy(&binary_body), "/hello:");
     }
 }
 
@@ -194,8 +194,8 @@ async fn forbidden_target_returns_encrypted_403() {
         encrypted_gateway_request(app, &x25519_config, "GET", "/", b"", &authority).await;
 
     assert_eq!(status, StatusCode::OK, "outer status stays 200");
-    let (inner_status, _) = decode_bhttp_response(&response_bytes);
-    assert_eq!(inner_status, 403);
+    let (binary_status, _) = decode_bhttp_response(&response_bytes);
+    assert_eq!(binary_status, 403);
 }
 
 #[tokio::test]
@@ -354,12 +354,12 @@ async fn redirect_target_is_followed_without_reallowlisting() {
     .await;
     assert_eq!(status, StatusCode::OK);
 
-    let (inner_status, inner_body) = decode_bhttp_response(&response_bytes);
+    let (binary_status, binary_body) = decode_bhttp_response(&response_bytes);
     assert_eq!(
-        inner_status, 200,
+        binary_status, 200,
         "the redirect must be followed, not blocked"
     );
-    assert_eq!(String::from_utf8_lossy(&inner_body), "/landed:");
+    assert_eq!(String::from_utf8_lossy(&binary_body), "/landed:");
 }
 
 #[tokio::test]
@@ -396,9 +396,9 @@ async fn rewrite_routes_request_to_configured_target() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    let (inner_status, inner_body) = decode_bhttp_response(&response_bytes);
-    assert_eq!(inner_status, 200);
-    assert_eq!(String::from_utf8_lossy(&inner_body), "/via-rewrite:");
+    let (binary_status, binary_body) = decode_bhttp_response(&response_bytes);
+    assert_eq!(binary_status, 200);
+    assert_eq!(String::from_utf8_lossy(&binary_body), "/via-rewrite:");
 }
 
 #[tokio::test]
@@ -457,12 +457,12 @@ async fn decrypt_only_generation_still_decrypts_but_is_not_advertised() {
     let (status, response_bytes) =
         encrypted_gateway_request(app, &retired_config, "GET", "/", b"", &authority).await;
     assert_eq!(status, StatusCode::OK);
-    let (inner_status, _) = decode_bhttp_response(&response_bytes);
-    assert_eq!(inner_status, 200);
+    let (binary_status, _) = decode_bhttp_response(&response_bytes);
+    assert_eq!(binary_status, 200);
 }
 
 #[tokio::test]
-async fn malformed_inner_bhttp_is_encrypted_400() {
+async fn malformed_binary_http_request_is_encrypted_400() {
     let key_ring = KeyRing::load(&test_generations()).unwrap();
     let x25519_config = key_config_for(&key_ring, 0);
     let app = build_app_with(key_ring, vec!["example.invalid".to_string()]);
@@ -486,6 +486,6 @@ async fn malformed_inner_bhttp_is_encrypted_400() {
         .await
         .unwrap();
     let decrypted = client_response.decapsulate(&body_bytes).unwrap();
-    let (inner_status, _) = decode_bhttp_response(&decrypted);
-    assert_eq!(inner_status, 400);
+    let (binary_status, _) = decode_bhttp_response(&decrypted);
+    assert_eq!(binary_status, 400);
 }

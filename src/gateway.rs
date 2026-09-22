@@ -30,14 +30,16 @@ fn outer_error(metrics: &mut RequestMetrics, err: OuterError) -> Response {
     (code, code.canonical_reason().unwrap_or("error")).into_response()
 }
 
-/// `POST /gateway`: decapsulate, translate BHTTP, forward, translate back
-/// and encapsulate. Errors before decapsulation succeeds are plaintext outer
+/// `POST /gateway`: decapsulate the Encapsulated Request, translate the
+/// enclosed binary HTTP request, forward it, translate the target's
+/// response back to binary HTTP, and encapsulate it as the Encapsulated
+/// Response. Errors before decapsulation succeeds are plaintext outer
 /// errors; errors afterwards are carried inside the encrypted response with
 /// the outer status held at 200 (DESIGN.md, matching the Go reference).
 pub async fn gateway_handler(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    body: Bytes,
+    encapsulated_request: Bytes,
 ) -> Response {
     let mut metrics = RequestMetrics::start("gateway");
 
@@ -48,7 +50,7 @@ pub async fn gateway_handler(
         return outer_error(&mut metrics, OuterError::InvalidContentType);
     }
 
-    let Some(&key_id) = body.first() else {
+    let Some(&key_id) = encapsulated_request.first() else {
         return outer_error(&mut metrics, OuterError::InvalidContent);
     };
 
@@ -58,7 +60,7 @@ pub async fn gateway_handler(
     metrics.set_kem(state.key_ring.kem_label(key_id));
     metrics.set_key_id(key_id);
 
-    let (request_bytes, response_context) = match server.decapsulate(&body) {
+    let (binary_request_bytes, response_context) = match server.decapsulate(&encapsulated_request) {
         Ok(v) => v,
         Err(err) => {
             tracing::warn!(error = ?err, key_id, "OHTTP decapsulation failed");
@@ -66,9 +68,10 @@ pub async fn gateway_handler(
         }
     };
 
-    let response_bytes = handle_inner_request(&state, &request_bytes, &mut metrics).await;
+    let binary_response_bytes =
+        forward_binary_http_request(&state, &binary_request_bytes, &mut metrics).await;
 
-    let encapsulated = match response_context.encapsulate(&response_bytes) {
+    let encapsulated_response = match response_context.encapsulate(&binary_response_bytes) {
         Ok(v) => v,
         Err(err) => {
             tracing::warn!(error = ?err, key_id, "OHTTP encapsulation failed");
@@ -83,21 +86,22 @@ pub async fn gateway_handler(
             (header::CONTENT_TYPE, OHTTP_RESPONSE_CONTENT_TYPE),
             (header::CONNECTION, "keep-alive"),
         ],
-        encapsulated,
+        encapsulated_response,
     )
         .into_response()
 }
 
-/// Decode the inner BHTTP request, forward it, and encode the BHTTP
-/// response bytes to be encapsulated. Never returns an outer-visible error:
-/// all failures after decapsulation are encoded as a BHTTP error response.
-async fn handle_inner_request(
+/// Decode the binary HTTP request, forward it, and encode the target's
+/// response as a binary HTTP response to be encapsulated. Never returns an
+/// outer-visible error: all failures after decapsulation are encoded as a
+/// BHTTP error response.
+async fn forward_binary_http_request(
     state: &AppState,
-    request_bytes: &[u8],
+    binary_request_bytes: &[u8],
     metrics: &mut RequestMetrics,
 ) -> Vec<u8> {
-    let inner = match bhttp::decode_request(request_bytes) {
-        Ok(inner) => inner,
+    let binary_request = match bhttp::decode_request(binary_request_bytes) {
+        Ok(request) => request,
         Err(err) => {
             metrics.set_outcome(err.outcome());
             return bhttp::encode_error_response(err.status(), &err.to_string());
@@ -105,7 +109,7 @@ async fn handle_inner_request(
     };
 
     let started_at = Instant::now();
-    let result = state.forwarder.forward(&inner).await;
+    let result = state.forwarder.forward(&binary_request).await;
     let upstream_outcome = match &result {
         Ok(_) => "success",
         Err(PayloadError::Forbidden) => "forbidden",

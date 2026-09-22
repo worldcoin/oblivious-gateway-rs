@@ -1,18 +1,24 @@
 //! Error types split by the two places DESIGN.md requires distinct handling:
 //! failures before decapsulation succeeds are reported as plaintext outer HTTP
 //! errors, while failures after decapsulation are reported inside the
-//! encrypted response with the outer HTTP status held at 200.
+//! encrypted response (the Encapsulated Response) with the outer HTTP
+//! status held at 200.
 
 use thiserror::Error;
 
-/// A failure while producing or validating the OHTTP encapsulation itself.
-/// These map to a plaintext outer HTTP error.
+/// A failure that occurs before an Encapsulated Response can be produced:
+/// either the plain HTTP POST carrying the Encapsulated Request was itself
+/// invalid (`InvalidContentType`, `InvalidContent`), or decapsulating/
+/// encapsulating the Encapsulated Request/Response failed. RFC 9458 has no
+/// collective name for this bucket — it only names the two encapsulated
+/// wire values, not "the POST request that carries them" — so grouping
+/// them as one plaintext-outer-error type is a project convention; see
+/// `docs/CONTEXT.md`'s "Outer Request/Response" entry.
 ///
 /// Status codes follow RFC 9458 rather than the Go reference: an unknown
 /// key identifier is a 400, per the RFC's registered `ohttp-key` problem
 /// type and its own example (RFC 9458 §9.5, §5.3 Figure 7) — not the Go
-/// gateway's 401. See `docs/CONTEXT.md` for the rest of the terminology
-/// this project aligns to RFC 9458.
+/// gateway's 401.
 #[derive(Debug, Error)]
 pub enum OuterError {
     #[error("unsupported content type")]
@@ -21,9 +27,9 @@ pub enum OuterError {
     InvalidContent,
     #[error("unknown key configuration")]
     ConfigMismatch,
-    #[error("decapsulation failed")]
+    #[error("failed to decapsulate the Encapsulated Request")]
     DecapsulationFailed,
-    #[error("encapsulation failed")]
+    #[error("failed to encapsulate the Encapsulated Response")]
     EncapsulationFailed,
 }
 
@@ -49,12 +55,12 @@ impl OuterError {
     }
 }
 
-/// A failure while handling the decapsulated inner request. These are
+/// A failure while handling the decapsulated binary HTTP request. These are
 /// reported to the client inside the encrypted response body, with the
 /// outer HTTP response remaining 200.
 #[derive(Debug, Error)]
 pub enum PayloadError {
-    #[error("malformed inner request")]
+    #[error("malformed binary HTTP request")]
     Malformed,
     #[error("target forbidden")]
     Forbidden,
