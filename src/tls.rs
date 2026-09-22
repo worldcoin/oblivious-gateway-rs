@@ -3,29 +3,31 @@
 //! offers `http.ListenAndServeTLS` with no client-certificate support
 //! (DESIGN.md).
 
-use std::fs::File;
-use std::io::BufReader;
 use std::sync::Arc;
 
 use axum_server::tls_rustls::RustlsConfig;
 use rustls::server::WebPkiClientVerifier;
 use rustls::RootCertStore;
+use rustls_pki_types::pem::PemObject;
+use rustls_pki_types::{CertificateDer, PrivateKeyDer};
 
 use crate::config::TlsConfig;
 use crate::error::StartupError;
 
-fn load_certs(path: &str) -> Result<Vec<rustls_pki_types::CertificateDer<'static>>, StartupError> {
-    let file = File::open(path).map_err(|e| StartupError::Tls(format!("opening {path}: {e}")))?;
-    rustls_pemfile::certs(&mut BufReader::new(file))
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| StartupError::Tls(format!("parsing certificates in {path}: {e}")))
+// Uses `rustls_pki_types::pem::PemObject` directly rather than the
+// `rustls-pemfile` crate: RUSTSEC-2025-0134 flags rustls-pemfile as
+// unmaintained and recommends this replacement, which is the code
+// rustls-pemfile itself now wraps.
+fn load_certs(path: &str) -> Result<Vec<CertificateDer<'static>>, StartupError> {
+    let iter = CertificateDer::pem_file_iter(path)
+        .map_err(|e| StartupError::Tls(format!("opening {path}: {e}")))?;
+    iter.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| StartupError::Tls(format!("reading certificates from {path}: {e}")))
 }
 
-fn load_private_key(path: &str) -> Result<rustls_pki_types::PrivateKeyDer<'static>, StartupError> {
-    let file = File::open(path).map_err(|e| StartupError::Tls(format!("opening {path}: {e}")))?;
-    rustls_pemfile::private_key(&mut BufReader::new(file))
-        .map_err(|e| StartupError::Tls(format!("parsing private key in {path}: {e}")))?
-        .ok_or_else(|| StartupError::Tls(format!("no private key found in {path}")))
+fn load_private_key(path: &str) -> Result<PrivateKeyDer<'static>, StartupError> {
+    PrivateKeyDer::from_pem_file(path)
+        .map_err(|e| StartupError::Tls(format!("reading private key from {path}: {e}")))
 }
 
 /// Build the incoming TLS acceptor configuration. When `client_ca_file` is

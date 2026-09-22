@@ -4,11 +4,11 @@
 //! client certificate"). Uses the self-signed fixtures under
 //! `tests/fixtures/tls/`, generated once for local testing only.
 
-use std::io::BufReader;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
+use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName, UnixTime};
 use rustls::{ClientConfig, SignatureScheme};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -72,17 +72,14 @@ impl ServerCertVerifier for AcceptAnyServerCert {
 }
 
 fn load_certs(path: &str) -> Vec<CertificateDer<'static>> {
-    let file = std::fs::File::open(path).unwrap();
-    rustls_pemfile::certs(&mut BufReader::new(file))
+    CertificateDer::pem_file_iter(path)
+        .unwrap()
         .collect::<Result<Vec<_>, _>>()
         .unwrap()
 }
 
 fn load_key(path: &str) -> PrivateKeyDer<'static> {
-    let file = std::fs::File::open(path).unwrap();
-    rustls_pemfile::private_key(&mut BufReader::new(file))
-        .unwrap()
-        .unwrap()
+    PrivateKeyDer::from_pem_file(path).unwrap()
 }
 
 async fn start_gateway_tls(tls_config: &TlsConfig) -> SocketAddr {

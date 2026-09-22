@@ -25,7 +25,6 @@ ohttp = { version = "0.8", features = ["server", "rust-hpke"], default-features 
 rand = "0.10.3"
 reqwest = { version = "0.13.5", default-features = false, features = ["rustls", "http2"] }
 rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs", "std", "tls12"] }
-rustls-pemfile = "2"
 rustls-pki-types = { version = "1", features = ["std"] }
 serde = { version = "1.0.229", features = ["derive"] }
 thiserror = "2.0.20"
