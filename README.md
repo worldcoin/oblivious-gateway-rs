@@ -1,46 +1,22 @@
 # oblivious-gateway-rs
 
-A standalone Rust implementation of an [RFC 9458](https://www.rfc-editor.org/rfc/rfc9458.html)
-Oblivious HTTP (OHTTP) gateway. It decapsulates encrypted OHTTP requests,
-translates the enclosed Binary HTTP ([RFC 9292](https://www.rfc-editor.org/rfc/rfc9292.html))
+[![License](https://img.shields.io/badge/license-BSD--3--Clause-blue.svg)](LICENSE)
+
+> ⚠️ **Active development. Not ready for production use.** ⚠️
+
+A standalone Rust [RFC 9458](https://www.rfc-editor.org/rfc/rfc9458.html)
+Oblivious HTTP (OHTTP) gateway: decapsulates an encrypted OHTTP request,
+translates the enclosed [Binary HTTP](https://www.rfc-editor.org/rfc/rfc9292.html)
 message to an ordinary HTTP request, forwards it to an allowlisted target,
 and encapsulates the response.
 
-This project is an independent implementation, functionally modeled on
-Cloudflare's [`privacy-gateway-server-go`](https://github.com/cloudflare/privacy-gateway-server-go)
-(BSD-3-Clause; see `NOTICE`), with a deliberately compatible X25519 key
-derivation so operators who reuse the same seed keep the same public key.
-See `docs/DESIGN.md` for the full accepted scope and design record.
-
-## Status
-
-Implemented per the approved v0 design on the `kempy/v0-gateway` branch.
-Not published, deployed, or load-tested; see [Known limitations](#known-limitations--effective-defaults).
-
-## Features
-
-- X25519 and X-Wing key encapsulation (HKDF-SHA256 + AES-128-GCM), derived
-  from operator-provided master seeds at startup.
-- Multiple overlapping key generations: every loaded generation can
-  decrypt; only generations marked `advertise = true` appear in
-  `/ohttp-keys`, supporting load-old-and-new-then-retire rotation.
-- Go-compatible X25519 derivation (final seed byte XORed with `0xff`
-  before derivation; see `docs/adr/0001-preserve-x25519-seed-derivation.md`),
-  verified against a fixture captured from the vendored Go reference.
-- TOML startup configuration; seeds may come from inline hex (testing
-  only), an environment variable, or a mounted file.
-- Fail-closed target allowlisting, checked once against the initial
-  destination; redirects are followed via the HTTP client's own
-  default, finite redirect policy (see
-  `docs/adr/0002-trust-allowed-targets-to-redirect.md`).
-- Optional target scheme/host rewrites.
-- Optional incoming HTTPS and direct mTLS (client-certificate
-  verification), via `rustls`. Outgoing HTTPS uses ordinary certificate
-  validation.
-- Prometheus metrics (via the `metrics` facade) on a separate,
-  independently configurable listener.
-- Graceful shutdown: stops accepting new connections and drains
-  in-flight requests within a configurable grace period.
+Independent implementation, functionally modeled on Cloudflare's
+[`privacy-gateway-server-go`](https://github.com/cloudflare/privacy-gateway-server-go)
+(BSD-3-Clause; see `NOTICE`), with a deliberately Go-compatible X25519 key
+derivation. Spec: [`docs/DESIGN.md`](docs/DESIGN.md) (accepted scope) and
+[`docs/CONTEXT.md`](docs/CONTEXT.md) (terminology, incl. where we diverge
+from the Go reference or from RFC 9458 itself). Not published, deployed,
+or load-tested.
 
 ## Quickstart
 
@@ -50,102 +26,55 @@ export OBLIVIOUS_GATEWAY_SEED_GEN0=$(openssl rand -hex 32)
 cargo run -- --config config/gateway.toml
 ```
 
-By default the gateway requires `forwarding.allowed_targets` to be
-non-empty. To run without any target restriction (development only), pass
-`--allow-any-target`; the process logs a startup warning when this is set.
+`forwarding.allowed_targets` must be non-empty unless you pass
+`--allow-any-target` (development only; logs a startup warning).
 
 ## Endpoints
 
 | Path (configurable) | Method | Behavior |
 |---|---|---|
-| `/gateway` | `POST` | Decrypts an OHTTP request, forwards the inner request, returns an encrypted OHTTP response. Requires `Content-Type: message/ohttp-req`. |
-| `/ohttp-keys` | any | RFC 9458 `application/ohttp-keys` list of currently *advertised* public key configurations, in configuration order (X25519 then X-Wing per generation). Randomized 12–36h private `Cache-Control`. |
-| `/health` | any | Unconditional liveness once startup validation and key loading succeed. Does not poll backends. |
+| `/gateway` | `POST` | Decrypt → forward → re-encrypt. Requires `Content-Type: message/ohttp-req`. |
+| `/ohttp-keys` | any | `application/ohttp-keys` list of advertised key configs. |
+| `/health` | any | Liveness only; does not poll backends. |
 | `/metrics` (separate listener) | `GET` | Prometheus scrape endpoint. |
 
-Unknown routes return 404. `/gateway` errors before decapsulation succeeds
-(bad content type, unreadable body, unknown key ID, decapsulation/
-encapsulation failure) are plaintext outer 400s, per RFC 9458 §9.5's
-registered `ohttp-key` problem type — the Go reference returns 401 for an
-unknown key identifier instead, but we follow the RFC's own example here
-rather than Go. Errors after successful decapsulation — malformed inner
-request (400), forbidden target (403), upstream failure (500) — are
-returned *inside* the encrypted response, with the outer HTTP status held
-at 200, matching the Go reference's error model.
+Unknown routes → 404. Pre-decryption failures are plaintext outer 400s
+(RFC 9458 §9.5's `ohttp-key` problem type — not the Go reference's 401 for
+an unknown key). Post-decryption failures (malformed request 400,
+forbidden target 403, upstream failure 500) are inside the encrypted
+response with the outer status held at 200, matching Go.
 
 ## Configuration
 
-See `config/gateway.example.toml` for a fully commented example. Key
-sections:
+See [`config/gateway.example.toml`](config/gateway.example.toml) for a
+fully commented example: `[server]` (listen address, paths, optional
+`[server.tls]` for HTTPS/mTLS), `[metrics]` (optional), `[forwarding]`
+(`allowed_targets`, optional `rewrites`), and one or more `[[generations]]`
+(`x25519_key_id`, `xwing_key_id`, `advertise`, and a `seed` from inline
+hex/env var/file, ≥32 bytes).
 
-- `[server]`: listen address, endpoint paths, shutdown grace period, and
-  an optional `[server.tls]` block (`cert_file`, `key_file`, and an
-  optional `client_ca_file` to require mTLS).
-- `[metrics]`: optional; omit to disable Prometheus metrics entirely.
-- `[forwarding]`: `allowed_targets` (exact `host[:port]`, matched against
-  the inner request's Host) and optional `[forwarding.rewrites]`.
-- `[[generations]]`: one or more key generations, each with
-  `x25519_key_id`, `xwing_key_id` (must be globally unique, 0–255), an
-  `advertise` flag (default `true`), and a `seed` source
-  (`{ hex = "..." }`, `{ env = "VAR_NAME" }`, or `{ file = "/path" }`).
-  Seeds must be at least 32 bytes of hex-decoded entropy.
-
-Configuration is loaded once at startup; there is no hot reload. All
-startup-time problems (duplicate key IDs, empty generation list, missing
-or short seeds, colliding endpoint paths, missing TLS files) fail fast
-with a structured log message and a non-zero exit code before the process
-starts serving traffic.
-
-### Key rotation runbook
-
-1. Add a new `[[generations]]` entry with `advertise = true` and a new
-   seed, keeping the existing generation(s) loaded. Restart.
-2. Once clients have adopted the new generation (via `/ohttp-keys` or an
-   embedded-client release), set the old generation's `advertise = false`
-   and restart; it still decrypts existing traffic.
-3. Once the operator is confident no client still needs the old
-   generation, remove it from the configuration and restart. There is no
-   automatic retirement or identifier reuse; both are operator decisions.
+Loaded once at startup, no hot reload; invalid config fails fast with a
+structured log and non-zero exit. **Rotation runbook**: add a new
+generation (`advertise = true`), restart; once clients have adopted it,
+set the old one's `advertise = false`, restart (it still decrypts); once
+safe, delete it and restart. No automatic retirement.
 
 ## Observability
 
-Metrics (Prometheus, low-cardinality labels only — no URLs, headers,
-bodies, seeds, or client identifiers):
+Prometheus via the `metrics` facade, bounded labels only (route, outcome,
+KEM, key ID, status class — never URLs/headers/bodies/seeds):
+`ohttp_gateway_requests_total`, `_request_duration_seconds`,
+`_upstream_duration_seconds`, `_target_status_total`, `_in_flight`,
+`_keys_loaded_total`, `_keys_advertised`. Structured JSON logs to stdout
+(`RUST_LOG`, default `info`).
 
-- `ohttp_gateway_requests_total{route,outcome,outer_status,kem}` (counter)
-- `ohttp_gateway_request_duration_seconds{route,outcome,kem}` (histogram)
-- `ohttp_gateway_upstream_duration_seconds{outcome}` (histogram)
-- `ohttp_gateway_target_status_total{status_class}` (counter; the
-  encrypted target's status class, tracked separately from the outer
-  HTTP status)
-- `ohttp_gateway_in_flight{route}` (gauge)
-- `ohttp_gateway_keys_loaded_total` / `ohttp_gateway_keys_advertised{kem}`
-  (gauges)
-
-Logs are structured (JSON via `tracing-subscriber`) to stdout. Control
-verbosity with `RUST_LOG` (defaults to `info`).
-
-## Building, testing, linting
+## Building, testing, Docker
 
 ```sh
-cargo build --locked
-cargo test --locked
-cargo fmt --all -- --check
-cargo clippy --all-targets -- -D warnings
-```
+cargo build --locked && cargo test --locked
+cargo fmt --all -- --check && cargo clippy --all-targets -- -D warnings
+cargo deny check licenses
 
-The test suite (`cargo test`) covers: the Go-compatible X25519 derivation
-fixture (`src/keys.rs`), startup configuration validation, full encrypted
-`/gateway` round trips for both X25519 and X-Wing against a local target,
-allowlist/forbidden-target/redirect/rewrite behavior, overlapping
-decrypt-only generations, malformed-payload handling, Prometheus telemetry
-accounting, and TLS/mTLS accept/reject behavior against locally generated
-test-only certificates under `tests/fixtures/tls/`. All tests run against
-local fixtures; none depend on live external services.
-
-## Docker
-
-```sh
 docker build -t oblivious-gateway .
 docker run --rm -p 8080:8080 -p 9090:9090 \
   -e OBLIVIOUS_GATEWAY_SEED_GEN0=<hex seed> \
@@ -153,67 +82,36 @@ docker run --rm -p 8080:8080 -p 9090:9090 \
   oblivious-gateway
 ```
 
-The image is a multi-stage build: a Debian-based builder stage (needed for
-`aws-lc-rs`'s bundled BoringSSL, which requires `cmake` and a C toolchain)
-producing a stripped release binary, copied into a `distroless/cc`
-nonroot runtime image with no shell.
+Tests use only local fixtures (`tests/fixtures/tls/`) and in-process
+targets — no live external services. Covers: the Go-compatible X25519
+fixture, config validation, full X25519/X-Wing round trips, allowlist/
+redirect/rewrite behavior, decrypt-only generations, telemetry, and
+TLS/mTLS accept/reject. Docker image: Debian builder (for `aws-lc-rs`) →
+`distroless/cc` nonroot runtime.
 
-## Known limitations / effective defaults
+## Known limitations
 
-Per the approved v0 scope, several behaviors intentionally use library
-defaults rather than custom configuration; they were inspected rather than
-assumed to match the Go reference:
-
-- **Request body size**: axum's `Bytes` extractor (used for the OHTTP
-  request body) enforces its documented default 2 MiB limit; this is not
-  configurable in v0. The Go reference has no body-size cap at all, so
-  this is a stricter default, not a looser one.
-- **Timeouts**: the outbound `reqwest::Client` uses a hardcoded 10s connect
-  / 30s overall request timeout (`src/forward.rs`) rather than reqwest's
-  unbounded default. This is a deliberate departure from "use library
-  defaults" for this one setting: an unbounded outbound call is a
-  resource-exhaustion risk (a stalled target would otherwise hold an
-  in-flight request, and its OHTTP response context, open indefinitely).
-  The inbound `axum`/`axum-server` listener still has no read/write
-  timeout, matching the Go reference. Operator-configurable timeouts
-  remain deferred to a follow-up; only the hardcoded default changed.
-- **Redirects**: `reqwest`'s default redirect policy is a limit of 10
-  hops (verified against its 0.13.5 source), not Go's default client
-  behavior exactly, but both are finite. The allowlist is checked only
-  against the initial destination (ADR 0002); an allowed target that
-  redirects can reach any destination it chooses, including internal
-  addresses. Operators should only allowlist targets they trust to
-  behave this way.
-- **No hot reload or scheduled rotation**: configuration and keys load
-  once at startup; rotation is a manual, restart-based runbook (above).
-- **No SSRF protection beyond exact hostname matching**: `allowed_targets`
-  matches the request's `Host` string exactly, but never resolves it and
-  checks the resulting IP. An allowlisted hostname that resolves (now, or
-  later via DNS rebinding) to a private, link-local, or cloud metadata
-  address is forwarded to without complaint — the same gap the Go
-  reference has, and it wasn't in the accepted v0 delivery scope, so it
-  wasn't closed here. This is separate from, and narrower than, the
-  redirect-trust behavior in ADR 0002 (which *is* an explicit, accepted
-  decision): here the exposure is on the operator-approved hostname
-  itself, not just where it might redirect afterward. Closing it would
-  mean resolving the hostname before connecting and rejecting
-  private/link-local/loopback/metadata-range results — a reasonable,
-  scoped follow-up if operators need it, but not implemented.
-- **No numerical performance/throughput acceptance criteria**: deferred at
-  the design stage; only "avoid unnecessary serialization" was targeted,
-  not benchmarked.
-- **No automated dependency vulnerability scanning in CI**: the license
-  allow-list is now enforced in CI (`deny.toml`, `cargo deny check
-  licenses`), but there is no `cargo audit`/`cargo deny check advisories`
-  step for known-vulnerable dependency versions. Adding that is a
-  reasonable follow-up.
-- **No response body size cap on the outbound (target) side**: `reqwest`
-  reads the full target response into memory before re-encoding it as
-  BHTTP; there is no explicit response-size limit in v0, matching the Go
-  reference.
+- **Body size**: axum's `Bytes` extractor caps requests at 2 MiB
+  (stricter than Go, which has no cap).
+- **Outbound timeouts**: hardcoded 10s connect / 30s request timeout
+  (`src/forward.rs`) — a deliberate departure from "use library defaults"
+  to avoid unbounded resource exhaustion. Not yet operator-configurable.
+  Inbound listener still has none, matching Go.
+- **Redirects trusted**: allowlist checked only on the initial
+  destination (accepted design, ADR 0002); an allowed target can redirect
+  anywhere, including internal addresses.
+- **No SSRF protection on the initial hostname**: exact string match only
+  — an allowlisted hostname resolving to a private/link-local/metadata
+  address (now, or via DNS rebinding) is not blocked. Same gap as the Go
+  reference; not in accepted v0 scope, so not closed here.
+- **No hot reload / scheduled rotation** — restart-based only, by design.
+- **No performance/throughput target** — deferred at design time.
+- **No `cargo audit`/advisory scanning** — license allow-list is CI-gated
+  (`deny.toml`), known-vulnerability scanning is not, yet.
+- **No outbound response size cap** — full target response is buffered
+  before re-encoding, matching Go.
 
 ## License
 
-BSD-3-Clause. See `LICENSE` and `NOTICE` (the latter records the
-functional relationship to the Go reference implementation and the
-dependency license review).
+BSD-3-Clause. See `LICENSE` and `NOTICE` (functional relationship to the
+Go reference and the dependency license review).
