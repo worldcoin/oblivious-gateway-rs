@@ -56,7 +56,8 @@ pub struct BinaryHttpRequest {
 /// # Errors
 ///
 /// Returns [`PayloadError::Malformed`] if `bytes` isn't a valid
-/// known-length BHTTP request, or its parts aren't valid HTTP.
+/// known-length BHTTP request, or its parts aren't valid HTTP. Returns
+/// [`PayloadError::UnsupportedExpectation`] for a 100-continue expectation.
 pub fn decode_request(bytes: &[u8]) -> Result<BinaryHttpRequest, PayloadError> {
     let mut cursor = Cursor::new(bytes);
     let message = Message::read_bhttp(&mut cursor).map_err(|_| PayloadError::Malformed)?;
@@ -74,8 +75,8 @@ pub fn decode_request(bytes: &[u8]) -> Result<BinaryHttpRequest, PayloadError> {
         .unwrap_or_default();
     let authority = control
         .authority()
-        .map(|a| String::from_utf8_lossy(a).into_owned())
-        .ok_or(PayloadError::Malformed)?;
+        .filter(|a| !a.is_empty())
+        .map(|a| String::from_utf8_lossy(a).into_owned());
     let path = control
         .path()
         .map(|p| String::from_utf8_lossy(p).into_owned())
@@ -83,6 +84,16 @@ pub fn decode_request(bytes: &[u8]) -> Result<BinaryHttpRequest, PayloadError> {
 
     let mut headers = HeaderMap::new();
     for field in message.header().iter() {
+        // RFC 9458 §5.1 forbids this handshake inside an encapsulated request.
+        // Check before removing connection-specific fields.
+        if field.name().eq_ignore_ascii_case(b"expect")
+            && field
+                .value()
+                .split(|b| *b == b',')
+                .any(|value| value.trim_ascii().eq_ignore_ascii_case(b"100-continue"))
+        {
+            return Err(PayloadError::UnsupportedExpectation);
+        }
         if is_hop_by_hop(field.name()) {
             continue;
         }
@@ -90,6 +101,23 @@ pub fn decode_request(bytes: &[u8]) -> Result<BinaryHttpRequest, PayloadError> {
         let value = HeaderValue::from_bytes(field.value()).map_err(|_| PayloadError::Malformed)?;
         headers.append(name, value);
     }
+
+    // RFC 9292 permits an empty authority when the destination is in Host.
+    let authority = match authority {
+        Some(authority) => authority,
+        None => {
+            let mut hosts = headers.get_all(reqwest::header::HOST).iter();
+            let host = hosts
+                .next()
+                .ok_or(PayloadError::Malformed)?
+                .to_str()
+                .map_err(|_| PayloadError::Malformed)?;
+            if host.is_empty() || hosts.next().is_some() {
+                return Err(PayloadError::Malformed);
+            }
+            host.to_string()
+        }
+    };
 
     Ok(BinaryHttpRequest {
         method,

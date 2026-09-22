@@ -30,6 +30,13 @@ const OHTTP_RESPONSE_CONTENT_TYPE: &str = "message/ohttp-res";
 /// README.md's "Known limitations"): 2 MiB.
 const MAX_ENCAPSULATED_REQUEST_BYTES: usize = 2 * 1024 * 1024;
 
+pub(crate) async fn method_not_allowed() -> Response {
+    let mut metrics = RequestMetrics::start("gateway");
+    metrics.set_outcome("invalid_method");
+    metrics.set_outer_status(405);
+    (StatusCode::METHOD_NOT_ALLOWED, [(header::ALLOW, "POST")]).into_response()
+}
+
 fn outer_error(metrics: &mut RequestMetrics, err: OuterError) -> Response {
     let status = err.status();
     metrics.set_outcome(err.outcome());
@@ -49,7 +56,7 @@ pub async fn gateway_handler(State(state): State<Arc<AppState>>, request: Reques
     let (parts, body) = request.into_parts();
 
     // RFC 9458 §5.1: "The encapsulation does not permit progressive
-    // processing of responses"; §5.1.2: "Clients MUST NOT construct a
+    // processing of responses"; §5.1: "Clients MUST NOT construct a
     // request that includes a 100-continue expectation; the Oblivious
     // Gateway Resource MUST generate an error if a 100-continue
     // expectation is received." Checked before the body is ever polled:

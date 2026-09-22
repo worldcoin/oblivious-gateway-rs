@@ -27,7 +27,7 @@ pub enum OuterError {
     /// The outer HTTP request body was missing or unreadable.
     #[error("failed to read request body")]
     InvalidContent,
-    /// RFC 9458 §5.1.2: "Clients MUST NOT construct a request that
+    /// RFC 9458 §5.1: "Clients MUST NOT construct a request that
     /// includes a 100-continue expectation; the Oblivious Gateway
     /// Resource MUST generate an error if a 100-continue expectation is
     /// received."
@@ -78,6 +78,10 @@ pub enum PayloadError {
     /// request (RFC 9292).
     #[error("malformed binary HTTP request")]
     Malformed,
+    /// A decoded request contains a 100-continue expectation, forbidden
+    /// by RFC 9458 §5.1.
+    #[error("unsupported expectation")]
+    UnsupportedExpectation,
     /// The request's target Host is not in `forwarding.allowed_targets`.
     #[error("target forbidden")]
     Forbidden,
@@ -91,7 +95,7 @@ impl PayloadError {
     #[must_use]
     pub fn status(&self) -> u16 {
         match self {
-            Self::Malformed => 400,
+            Self::Malformed | Self::UnsupportedExpectation => 400,
             Self::Forbidden => 403,
             Self::TargetFailed => 500,
         }
@@ -103,6 +107,7 @@ impl PayloadError {
     pub fn outcome(&self) -> &'static str {
         match self {
             Self::Malformed => "content_decode_failed",
+            Self::UnsupportedExpectation => "unsupported_expectation",
             Self::Forbidden => "request_forbidden",
             Self::TargetFailed => "request_failed",
         }

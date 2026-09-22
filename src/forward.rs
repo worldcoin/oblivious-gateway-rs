@@ -10,7 +10,8 @@
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
-use reqwest::{Client, Method};
+use axum::http::uri::{Authority, PathAndQuery};
+use reqwest::{Client, Method, Url};
 
 use crate::bhttp::BinaryHttpRequest;
 use crate::config::{ForwardingConfig, RewriteTarget};
@@ -25,6 +26,29 @@ use crate::error::PayloadError;
 /// default changes.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+
+fn target_url(scheme: &str, authority: &str, path: &str) -> Result<Url, PayloadError> {
+    if !scheme.eq_ignore_ascii_case("http") && !scheme.eq_ignore_ascii_case("https") {
+        return Err(PayloadError::Malformed);
+    }
+    authority
+        .parse::<Authority>()
+        .map_err(|_| PayloadError::Malformed)?;
+    if authority.contains(['@', '\\']) || !path.starts_with('/') || path.contains('#') {
+        return Err(PayloadError::Malformed);
+    }
+    let path_and_query = path
+        .parse::<PathAndQuery>()
+        .map_err(|_| PayloadError::Malformed)?;
+    let mut url =
+        Url::parse(&format!("{scheme}://{authority}/")).map_err(|_| PayloadError::Malformed)?;
+
+    // Set components separately: joining or concatenating an untrusted path
+    // can reinterpret it as credentials or a different destination.
+    url.set_path(path_and_query.path());
+    url.set_query(path_and_query.query());
+    Ok(url)
+}
 
 /// Forwards decapsulated binary HTTP requests to their allowlisted target.
 pub struct Forwarder {
@@ -86,22 +110,22 @@ impl Forwarder {
             ),
         };
 
-        let url = format!("{scheme}://{host}{}", request.path);
+        let url = target_url(&scheme, &host, &request.path)?;
         let method = Method::from_bytes(request.method.as_str().as_bytes())
             .map_err(|_| PayloadError::Malformed)?;
 
         let outbound_request = self
             .client
-            .request(method, &url)
+            .request(method, url)
             .headers(request.headers.clone())
             .body(request.body.clone());
 
         outbound_request.send().await.map_err(|err| {
             tracing::warn!(
-                error = %err,
-                authority = %request.authority,
                 timed_out = err.is_timeout(),
                 is_connect = err.is_connect(),
+                is_redirect = err.is_redirect(),
+                is_request = err.is_request(),
                 "target request failed"
             );
             PayloadError::TargetFailed
@@ -114,7 +138,7 @@ impl Forwarder {
     /// # Errors
     ///
     /// Returns [`PayloadError::Forbidden`] if the target isn't allowlisted,
-    /// [`PayloadError::Malformed`] if its method isn't valid HTTP, or
+    /// [`PayloadError::Malformed`] if its method or target components are invalid, or
     /// [`PayloadError::TargetFailed`] if the request couldn't be sent or
     /// its response couldn't be read.
     pub async fn forward(
@@ -125,9 +149,58 @@ impl Forwarder {
         let status = response.status().as_u16();
         let headers = response.headers().clone();
         let body = response.bytes().await.map_err(|err| {
-            tracing::warn!(error = %err, authority = %request.authority, "reading target response body failed");
+            tracing::warn!(
+                timed_out = err.is_timeout(),
+                is_body = err.is_body(),
+                is_decode = err.is_decode(),
+                "reading target response body failed"
+            );
             PayloadError::TargetFailed
         })?;
         Ok((status, headers, body.to_vec()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::target_url;
+
+    #[test]
+    fn paths_cannot_change_the_destination() {
+        for path in [
+            "/ordinary",
+            "//other.example/private",
+            "/\\other.example/private",
+            "/@other.example/private",
+            "/%2f%2fother.example/private?next=http://other.example/",
+        ] {
+            let url = target_url("https", "allowed.example:8443", path).unwrap();
+            assert_eq!(url.host_str(), Some("allowed.example"), "{path}");
+            assert_eq!(url.port(), Some(8443), "{path}");
+            assert!(url.username().is_empty());
+        }
+    }
+
+    #[test]
+    fn invalid_target_components_are_rejected() {
+        for (scheme, authority, path) in [
+            ("http", "allowed.example", "@127.0.0.1:8080/private"),
+            ("http", "allowed.example", "http://other.example/private"),
+            ("http", "allowed.example", "relative"),
+            ("http", "allowed.example", "/path#fragment"),
+            ("http", "allowed.example", "/path\r\nheader"),
+            ("http", "user@other.example", "/"),
+            ("http", "allowed.example/path", "/"),
+            ("http", "allowed.example\\other.example", "/"),
+            ("file", "allowed.example", "/"),
+        ] {
+            assert!(target_url(scheme, authority, path).is_err());
+        }
+    }
+
+    #[test]
+    fn target_preserves_encoded_path_query_and_ipv6_port() {
+        let url = target_url("http", "[::1]:8080", "/a%2Fb?value=%2F&next=@host").unwrap();
+        assert_eq!(url.as_str(), "http://[::1]:8080/a%2Fb?value=%2F&next=@host");
     }
 }

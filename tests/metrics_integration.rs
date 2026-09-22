@@ -7,7 +7,6 @@ use std::sync::Arc;
 
 use axum::body::Body;
 use axum::http::Request;
-use metrics_exporter_prometheus::PrometheusBuilder;
 use ohttp::ClientRequest;
 use tower::ServiceExt;
 
@@ -20,9 +19,12 @@ const SEED_HEX: &str = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b
 
 #[tokio::test]
 async fn gateway_request_updates_prometheus_counters() {
-    // Each test binary installs the global recorder once; use a
-    // process-local handle here since this file's tests run in one binary.
-    let handle = PrometheusBuilder::new().install_recorder().unwrap();
+    let reservation = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let metrics_addr = reservation.local_addr().unwrap();
+    drop(reservation);
+    oblivious_gateway::metrics::install(&metrics_addr.to_string(), "/metrics")
+        .await
+        .unwrap();
 
     let key_ring = KeyRing::load(&[GenerationConfig {
         x25519_key_id: 0,
@@ -78,6 +80,7 @@ async fn gateway_request_updates_prometheus_counters() {
     let (enc_request, _client_response) = client.encapsulate(&binary_request_bytes).unwrap();
 
     let response = app
+        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -90,7 +93,51 @@ async fn gateway_request_updates_prometheus_counters() {
         .unwrap();
     assert_eq!(response.status(), 200);
 
-    let rendered = handle.render();
+    let wrong_method = app
+        .oneshot(
+            Request::builder()
+                .uri("/gateway")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(wrong_method.status(), 405);
+    assert_eq!(wrong_method.headers()["allow"], "POST");
+
+    let rendered = reqwest::Client::builder()
+        .no_proxy()
+        .build()
+        .unwrap()
+        .get(format!("http://{metrics_addr}/metrics"))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    for metric in [
+        "ohttp_gateway_request_duration_seconds",
+        "ohttp_gateway_upstream_duration_seconds",
+    ] {
+        assert!(rendered.contains(&format!("# TYPE {metric} histogram")));
+        assert!(rendered.contains(&format!("{metric}_bucket{{")));
+        assert!(!rendered.contains("quantile="));
+    }
+    let counters: Vec<_> = rendered
+        .lines()
+        .filter(|line| line.starts_with("ohttp_gateway_requests_total{"))
+        .collect();
+    assert_eq!(counters.len(), 2);
+    assert!(counters.iter().all(|line| line.ends_with(" 1")));
+    assert!(counters.iter().any(|line| {
+        line.contains("outcome=\"invalid_method\"") && line.contains("outer_status=\"405\"")
+    }));
+    assert!(rendered.lines().any(|line| {
+        line.starts_with("ohttp_gateway_request_duration_seconds_count{")
+            && line.contains("outcome=\"invalid_method\"")
+            && line.ends_with(" 1")
+    }));
     assert!(
         rendered.contains("ohttp_gateway_requests_total"),
         "missing request counter:\n{rendered}"

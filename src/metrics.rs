@@ -27,25 +27,27 @@ async fn render(State(handle): State<PrometheusHandle>) -> String {
 ///
 /// Returns [`StartupError::Config`] if `listen_addr` doesn't parse as a
 /// socket address, or if installing the global Prometheus recorder fails
-/// (e.g. one is already installed).
-pub fn install(listen_addr: &str, path: &str) -> Result<(), StartupError> {
+/// (e.g. one is already installed). Returns [`StartupError::Io`] if the
+/// listener cannot bind; the recorder is not installed in that case.
+pub async fn install(listen_addr: &str, path: &str) -> Result<(), StartupError> {
     let addr: SocketAddr = listen_addr
         .parse()
         .map_err(|e| StartupError::Config(format!("invalid metrics listen_addr: {e}")))?;
 
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+
     let handle = PrometheusBuilder::new()
+        .set_buckets(&[
+            0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0,
+        ])
+        .map_err(|e| StartupError::Config(format!("configuring histogram buckets: {e}")))?
         .install_recorder()
         .map_err(|e| StartupError::Config(format!("installing Prometheus recorder: {e}")))?;
 
     let app = Router::new().route(path, get(render)).with_state(handle);
     tokio::spawn(async move {
-        match tokio::net::TcpListener::bind(addr).await {
-            Ok(listener) => {
-                if let Err(err) = axum::serve(listener, app).await {
-                    tracing::error!(error = %err, "metrics listener stopped");
-                }
-            }
-            Err(err) => tracing::error!(error = %err, %addr, "failed to bind metrics listener"),
+        if let Err(err) = axum::serve(listener, app).await {
+            tracing::error!(error = %err, "metrics listener stopped");
         }
     });
 

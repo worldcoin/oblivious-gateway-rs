@@ -101,7 +101,6 @@ async fn encrypted_gateway_request(
     body: &[u8],
     authority: &str,
 ) -> (StatusCode, Vec<u8>) {
-    let client = ClientRequest::from_encoded_config(key_config_bytes).unwrap();
     let mut bhttp_msg = bhttp::Message::request(
         method.as_bytes().to_vec(),
         b"http".to_vec(),
@@ -109,6 +108,15 @@ async fn encrypted_gateway_request(
         path.as_bytes().to_vec(),
     );
     bhttp_msg.write_content(body);
+    encrypted_binary_gateway_request(app, key_config_bytes, &bhttp_msg).await
+}
+
+async fn encrypted_binary_gateway_request(
+    app: axum::Router,
+    key_config_bytes: &[u8],
+    bhttp_msg: &bhttp::Message,
+) -> (StatusCode, Vec<u8>) {
+    let client = ClientRequest::from_encoded_config(key_config_bytes).unwrap();
     let mut binary_request_bytes = Vec::new();
     bhttp_msg
         .write_bhttp(bhttp::Mode::KnownLength, &mut binary_request_bytes)
@@ -148,6 +156,44 @@ fn decode_bhttp_response(bytes: &[u8]) -> (u16, Vec<u8>) {
     (status, msg.content().to_vec())
 }
 
+#[tokio::test]
+async fn host_only_requests_use_the_same_allowlist() {
+    let authority = spawn_target().await.to_string();
+    let key_ring = KeyRing::load(&test_generations()).unwrap();
+    for key_id in [0, 1] {
+        let key_config = key_config_for(&key_ring, key_id);
+        for (hosts, expected) in [
+            (vec![authority.as_str()], 200),
+            (vec!["forbidden.example"], 403),
+            (vec![], 400),
+            (vec![""], 400),
+            (vec![authority.as_str(), "forbidden.example"], 400),
+        ] {
+            let mut message = bhttp::Message::request(
+                b"GET".to_vec(),
+                b"http".to_vec(),
+                vec![],
+                b"/host-only".to_vec(),
+            );
+            for host in hosts {
+                message.put_header(b"Host".to_vec(), host.as_bytes().to_vec());
+            }
+            let (outer_status, response) = encrypted_binary_gateway_request(
+                build_app(vec![authority.clone()]),
+                &key_config,
+                &message,
+            )
+            .await;
+            assert_eq!(outer_status, StatusCode::OK);
+            let (status, body) = decode_bhttp_response(&response);
+            assert_eq!(status, expected);
+            if expected == 200 {
+                assert_eq!(body, b"/host-only:");
+            }
+        }
+    }
+}
+
 fn key_config_for(key_ring: &KeyRing, key_id: u8) -> Vec<u8> {
     // Decode the advertised list and pick out the one matching key_id.
     let configs = ohttp::KeyConfig::decode_list(key_ring.advertised_configs()).unwrap();
@@ -157,6 +203,77 @@ fn key_config_for(key_ring: &KeyRing, key_id: u8) -> Vec<u8> {
         .unwrap()
         .encode()
         .unwrap()
+}
+
+#[tokio::test]
+async fn decoded_continue_expectation_is_rejected_without_contacting_target() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let contacts = Arc::new(AtomicUsize::new(0));
+    let target_contacts = contacts.clone();
+    let target = axum::Router::new().route(
+        "/",
+        axum::routing::post(move || {
+            let contacts = target_contacts.clone();
+            async move {
+                contacts.fetch_add(1, Ordering::SeqCst);
+                "unexpected forwarding"
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let authority = listener.local_addr().unwrap().to_string();
+    let server = tokio::spawn(async move { axum::serve(listener, target).await.unwrap() });
+    let key_ring = KeyRing::load(&test_generations()).unwrap();
+
+    for key_id in [0, 1] {
+        for expectations in [
+            vec!["100-continue"],
+            vec![" 100-CoNtInUe "],
+            vec!["other, 100-continue"],
+            vec!["other", "100-continue"],
+        ] {
+            let mut message = bhttp::Message::request(
+                b"POST".to_vec(),
+                b"http".to_vec(),
+                authority.as_bytes().to_vec(),
+                b"/".to_vec(),
+            );
+            for value in expectations {
+                message.put_header(b"expect".to_vec(), value.as_bytes().to_vec());
+            }
+            message.write_content(b"already encrypted body");
+            let mut encoded = Vec::new();
+            message
+                .write_bhttp(bhttp::Mode::KnownLength, &mut encoded)
+                .unwrap();
+            let client =
+                ClientRequest::from_encoded_config(&key_config_for(&key_ring, key_id)).unwrap();
+            let (encapsulated, context) = client.encapsulate(&encoded).unwrap();
+            let response = build_app(vec![authority.clone()])
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/gateway")
+                        .header("content-type", "message/ohttp-req")
+                        .body(Body::from(encapsulated))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            assert_eq!(response.headers()["content-type"], "message/ohttp-res");
+            let encrypted = axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            let decoded = context.decapsulate(&encrypted).unwrap();
+            let (status, body) = decode_bhttp_response(&decoded);
+            assert_eq!(status, 400);
+            assert_eq!(body, b"unsupported expectation");
+        }
+    }
+    assert_eq!(contacts.load(Ordering::SeqCst), 0);
+    server.abort();
 }
 
 #[tokio::test]
@@ -360,6 +477,48 @@ async fn redirect_target_is_followed_without_reallowlisting() {
         "the redirect must be followed, not blocked"
     );
     assert_eq!(String::from_utf8_lossy(&binary_body), "/landed:");
+}
+
+#[tokio::test]
+async fn crafted_path_cannot_bypass_allowlist_or_override_rewrite() {
+    let forbidden_target = spawn_target().await;
+    let rewritten_target = spawn_target().await;
+    let key_ring = KeyRing::load(&test_generations()).unwrap();
+    let authority = "allowed.example";
+
+    for key_id in [0, 1] {
+        let key_config = key_config_for(&key_ring, key_id);
+        for with_rewrite in [false, true] {
+            let mut rewrites = std::collections::HashMap::new();
+            if with_rewrite {
+                rewrites.insert(
+                    authority.to_string(),
+                    oblivious_gateway::config::RewriteTarget {
+                        scheme: "http".to_string(),
+                        host: rewritten_target.to_string(),
+                    },
+                );
+            }
+            let app = build_app_with_forwarding(
+                KeyRing::load(&test_generations()).unwrap(),
+                ForwardingConfig {
+                    allowed_targets: vec![authority.to_string()],
+                    rewrites,
+                },
+            );
+            let (outer_status, response) = encrypted_gateway_request(
+                app,
+                &key_config,
+                "GET",
+                &format!("@{forbidden_target}/private"),
+                b"",
+                authority,
+            )
+            .await;
+            assert_eq!(outer_status, StatusCode::OK);
+            assert_eq!(decode_bhttp_response(&response).0, 400);
+        }
+    }
 }
 
 #[tokio::test]

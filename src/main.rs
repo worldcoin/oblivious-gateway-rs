@@ -65,11 +65,16 @@ async fn run() -> Result<(), StartupError> {
         advertised_xwing = key_ring.advertised_xwing_count(),
         "key ring loaded"
     );
-    metrics::set_key_gauges(
-        key_ring.loaded_key_count(),
-        key_ring.advertised_x25519_count(),
-        key_ring.advertised_xwing_count(),
-    );
+    if let Some(metrics_config) = &file_config.metrics {
+        metrics::install(&metrics_config.listen_addr, &metrics_config.path).await?;
+        metrics::set_key_gauges(
+            key_ring.loaded_key_count(),
+            key_ring.advertised_x25519_count(),
+            key_ring.advertised_xwing_count(),
+        );
+    } else {
+        tracing::warn!("no [metrics] section configured; Prometheus metrics are not exposed");
+    }
 
     let forwarder = Forwarder::new(&file_config.forwarding, cli.allow_any_target);
     let state = Arc::new(AppState {
@@ -77,12 +82,6 @@ async fn run() -> Result<(), StartupError> {
         forwarder,
     });
     let app = build_router(state, &file_config.server);
-
-    if let Some(metrics_config) = &file_config.metrics {
-        metrics::install(&metrics_config.listen_addr, &metrics_config.path)?;
-    } else {
-        tracing::warn!("no [metrics] section configured; Prometheus metrics are not exposed");
-    }
 
     let addr: std::net::SocketAddr = file_config
         .server
