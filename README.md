@@ -200,10 +200,11 @@ assumed to match the Go reference:
 - **No numerical performance/throughput acceptance criteria**: deferred at
   the design stage; only "avoid unnecessary serialization" was targeted,
   not benchmarked.
-- **No automated dependency license/vulnerability scanning in CI**: the
-  full dependency license set was reviewed manually once (recorded in
-  `NOTICE`); it is not re-checked automatically on every change. Adding
-  `cargo deny` or `cargo audit` to CI is a reasonable follow-up.
+- **No automated dependency vulnerability scanning in CI**: the license
+  allow-list is now enforced in CI (`deny.toml`, `cargo deny check
+  licenses`), but there is no `cargo audit`/`cargo deny check advisories`
+  step for known-vulnerable dependency versions. Adding that is a
+  reasonable follow-up.
 - **No response body size cap on the outbound (target) side**: `reqwest`
   reads the full target response into memory before re-encoding it as
   BHTTP; there is no explicit response-size limit in v0, matching the Go

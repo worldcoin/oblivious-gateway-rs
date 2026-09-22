@@ -21,9 +21,11 @@ Third-party Rust crate dependency licenses were reviewed via `cargo
 metadata` against the locked dependency graph (`Cargo.lock`). Every
 dependency declares a permissive license (MIT, Apache-2.0, BSD-2/3-Clause,
 ISC, Zlib, Unicode-3.0, CDLA-Permissive-2.0, BSL-1.0, or Unlicense, in
-various dual/multi-license combinations); none are copyleft. Re-run this
-check after any dependency change:
+various dual/multi-license combinations); none are copyleft. This is now
+an enforced CI gate, not just a one-time manual check: `deny.toml` encodes
+the same allow-list and runs as the `deny` job in
+`.github/workflows/ci.yml` on every push and pull request via `cargo deny
+check licenses`. Run it locally with:
 
-    cargo metadata --format-version 1 --locked | \
-      jq -r '.packages[] | .license // "UNKNOWN"' | sort | uniq -c
+    cargo deny check licenses
 

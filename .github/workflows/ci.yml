@@ -37,6 +37,15 @@ jobs:
       - name: Test
         run: cargo test --locked
 
+  deny:
+    name: dependency license check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check licenses
+
   docker:
     name: docker build
     runs-on: ubuntu-latest
