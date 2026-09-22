@@ -1,7 +1,6 @@
 //! Incoming TLS configuration: ordinary HTTPS, or optional direct mTLS when
 //! a client CA is configured. This extends the Go reference, which only
-//! offers `http.ListenAndServeTLS` with no client-certificate support
-//! (DESIGN.md).
+//! offers `http.ListenAndServeTLS` with no client-certificate support.
 
 use std::sync::Arc;
 

@@ -1,12 +1,12 @@
 //! Key generation loading and the decryption/advertisement key ring.
 //!
-//! See `docs/adr/0001-preserve-x25519-seed-derivation.md`: each generation
-//! derives its X-Wing key from the operator's master seed unmodified, and
-//! its X25519 key from a copy of that seed with the final byte XORed with
-//! `0xff`. This reproduces the Go gateway's legacy X25519 derivation input
-//! byte-for-byte, so embedded client configurations that predate this
-//! rewrite keep working when operators reuse the same seed and key
-//! identifier. Both KEMs use HKDF-SHA256 + AES-128-GCM (DESIGN.md).
+//! Each generation derives its X-Wing key from the operator's master seed
+//! unmodified, and its X25519 key from a copy of that seed with the final
+//! byte XORed with `0xff`. This reproduces the Go gateway's legacy X25519
+//! derivation input byte-for-byte, so embedded client configurations that
+//! predate this rewrite keep working when operators reuse the same seed
+//! and key identifier (see GLOSSARY.md). Both KEMs use HKDF-SHA256 +
+//! AES-128-GCM.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -22,7 +22,7 @@ fn symmetric_suites() -> Vec<SymmetricSuite> {
 }
 
 /// Copy the seed and flip the final byte, matching the Go gateway's legacy
-/// X25519 derivation input. See module docs and ADR 0001.
+/// X25519 derivation input. See module docs above.
 fn x25519_seed_transform(seed: &[u8]) -> Vec<u8> {
     let mut transformed = seed.to_vec();
     if let Some(last) = transformed.last_mut() {
@@ -32,7 +32,7 @@ fn x25519_seed_transform(seed: &[u8]) -> Vec<u8> {
 }
 
 /// One operator-managed pair of gateway keys derived from a single master
-/// seed ("Key Generation" in `docs/CONTEXT.md`).
+/// seed ("Key Generation" in GLOSSARY.md).
 pub struct Generation {
     pub x25519_key_id: KeyId,
     pub xwing_key_id: KeyId,
@@ -80,7 +80,7 @@ impl Generation {
 
 /// The full set of decryption servers plus the currently advertised public
 /// configuration list. Every loaded generation can decrypt; only advertised
-/// generations are published (DESIGN.md's decrypt-only rotation support).
+/// generations are published, supporting decrypt-only rotation.
 pub struct KeyRing {
     servers: HashMap<KeyId, Arc<Server>>,
     advertised_configs: Vec<u8>,
@@ -94,8 +94,8 @@ impl KeyRing {
         let mut servers = HashMap::new();
         let mut kem_by_key_id = HashMap::new();
         // Publish in configuration order, X25519 then X-Wing per generation,
-        // as required by DESIGN.md so operators control preference by
-        // ordering generations with newer ones last.
+        // so operators control preference by ordering generations with
+        // newer ones last.
         let mut advertise_list: Vec<KeyConfig> = Vec::new();
 
         for gen_cfg in generations {

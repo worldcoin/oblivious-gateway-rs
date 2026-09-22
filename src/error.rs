@@ -1,4 +1,4 @@
-//! Error types split by the two places DESIGN.md requires distinct handling:
+//! Error types split by the two places OHTTP requires distinct handling:
 //! failures before decapsulation succeeds are reported as plaintext outer HTTP
 //! errors, while failures after decapsulation are reported inside the
 //! encrypted response (the Encapsulated Response) with the outer HTTP
@@ -13,7 +13,7 @@ use thiserror::Error;
 /// collective name for this bucket — it only names the two encapsulated
 /// wire values, not "the POST request that carries them" — so grouping
 /// them as one plaintext-outer-error type is a project convention; see
-/// `docs/CONTEXT.md`'s "Outer Request/Response" entry.
+/// GLOSSARY.md's "Outer Request/Response" entry.
 ///
 /// Status codes follow RFC 9458 rather than the Go reference: an unknown
 /// key identifier is a 400, per the RFC's registered `ohttp-key` problem

@@ -21,7 +21,7 @@ struct Cli {
 
     /// Disable target allowlisting and forward requests to any destination.
     /// Off by default: an allowlist is required unless this is set
-    /// explicitly (DESIGN.md).
+    /// explicitly.
     #[arg(long)]
     allow_any_target: bool,
 }

@@ -1,8 +1,7 @@
-# cargo-deny gate: licenses (DESIGN.md: "review dependency licenses before
-# distribution"), banned/duplicate dependencies, source registries, and
-# security advisories. CI runs these as two jobs matching the org
-# convention (see .github/workflows/ci.yml): `licenses`/`bans`/`sources`
-# are a hard gate, `advisories` is soft (continue-on-error) since a new
+# cargo-deny gate: licenses, banned/duplicate dependencies, source
+# registries, and security advisories. CI runs these as two jobs (see
+# .github/workflows/ci.yml): `licenses`/`bans`/`sources` are a hard gate,
+# `advisories` is soft (continue-on-error) since a new
 # RUSTSEC entry can appear for a dependency with no fix available yet and
 # shouldn't silently block unrelated pull requests.
 #

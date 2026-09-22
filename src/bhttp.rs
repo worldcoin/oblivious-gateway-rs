@@ -115,7 +115,7 @@ pub fn encode_response(status: u16, headers: &HeaderMap, body: &[u8]) -> Vec<u8>
 /// Build a minimal known-length BHTTP error response with a plain-text body,
 /// used when the gateway must report a payload-level failure (malformed
 /// request, forbidden target, upstream failure) inside the encrypted
-/// response while the outer HTTP status stays 200 (DESIGN.md).
+/// response while the outer HTTP status stays 200.
 pub fn encode_error_response(status: u16, message: &str) -> Vec<u8> {
     let mut headers = HeaderMap::new();
     headers.insert(

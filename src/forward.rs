@@ -1,11 +1,11 @@
 //! Outbound forwarding to the Target Resource: allowlisting, scheme/host
 //! rewrites, and the HTTP client used to reach the target.
 //!
-//! Per `docs/adr/0002-trust-allowed-targets-to-redirect.md`, the allowlist is
-//! checked only against the initial destination; redirects are followed
-//! using the HTTP client's own (finite, default) redirect handling without
-//! re-validating each hop. Operators who allowlist a target are trusting it
-//! to choose subsequent destinations, including internal ones.
+//! The allowlist is checked only against the initial destination; redirects
+//! are followed using the HTTP client's own (finite, default) redirect
+//! handling without re-validating each hop. Operators who allowlist a
+//! target are trusting it to choose subsequent destinations, including
+//! internal ones — see GLOSSARY.md's "Where we knowingly diverge" section.
 
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
@@ -21,9 +21,8 @@ use crate::error::PayloadError;
 /// indefinitely. The Go reference and reqwest's own defaults have no such
 /// bound; this is a deliberate departure from "use library defaults" for
 /// this one setting, per the organization's mandatory bounded-remote-call
-/// timeout rule. Not currently operator-configurable (v0 keeps timeout
-/// *configuration* deferred, per DESIGN.md); only the hardcoded default
-/// changes.
+/// timeout rule. Not currently operator-configurable; only the hardcoded
+/// default changes.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 

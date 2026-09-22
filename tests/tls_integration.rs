@@ -1,8 +1,7 @@
-//! Incoming TLS acceptance and rejection, including optional direct mTLS
-//! (DESIGN.md: "Support optional incoming HTTPS ... Optional direct
-//! incoming mTLS is accepted: configuring a client CA requires a verified
-//! client certificate"). Uses the self-signed fixtures under
-//! `tests/fixtures/tls/`, generated once for local testing only.
+//! Incoming TLS acceptance and rejection, including optional direct mTLS:
+//! configuring a client CA requires a verified client certificate. Uses
+//! the self-signed fixtures under `tests/fixtures/tls/`, generated once
+//! for local testing only.
 
 use std::net::SocketAddr;
 use std::sync::Arc;

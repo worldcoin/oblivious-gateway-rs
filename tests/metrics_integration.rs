@@ -1,7 +1,7 @@
 //! Telemetry accounting: the Prometheus scrape output must carry the
 //! request counter, duration histogram and target-status metrics after a
-//! request, with only bounded labels (DESIGN.md: no URLs, headers, bodies,
-//! seeds or client identifiers in telemetry).
+//! request, with only bounded labels — no URLs, headers, bodies, seeds or
+//! client identifiers in telemetry.
 
 use std::sync::Arc;
 

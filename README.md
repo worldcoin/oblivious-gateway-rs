@@ -13,10 +13,9 @@ and encapsulates the response.
 Independent implementation, functionally modeled on Cloudflare's
 [`privacy-gateway-server-go`](https://github.com/cloudflare/privacy-gateway-server-go)
 (BSD-3-Clause; see `NOTICE`), with a deliberately Go-compatible X25519 key
-derivation. Spec: [`docs/DESIGN.md`](docs/DESIGN.md) (accepted scope) and
-[`docs/CONTEXT.md`](docs/CONTEXT.md) (terminology, incl. where we diverge
-from the Go reference or from RFC 9458 itself). Not published, deployed,
-or load-tested.
+derivation. See [`GLOSSARY.md`](GLOSSARY.md) for terminology and where we
+knowingly diverge from the Go reference or from RFC 9458 itself. Not
+published, deployed, or load-tested.
 
 ## Quickstart
 
@@ -113,8 +112,8 @@ yet** — create it before cutting the first release.
   to avoid unbounded resource exhaustion. Not yet operator-configurable.
   Inbound listener still has none, matching Go.
 - **Redirects trusted**: allowlist checked only on the initial
-  destination (accepted design, ADR 0002); an allowed target can redirect
-  anywhere, including internal addresses.
+  destination (deliberate — see `GLOSSARY.md`); an allowed target can
+  redirect anywhere, including internal addresses.
 - **No SSRF protection on the initial hostname**: exact string match only
   — an allowlisted hostname resolving to a private/link-local/metadata
   address (now, or via DNS rebinding) is not blocked. Same gap as the Go

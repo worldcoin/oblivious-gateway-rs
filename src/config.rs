@@ -1,6 +1,5 @@
-//! TOML startup configuration (DESIGN.md: "Use a startup TOML configuration
-//! file for v0"). Configuration is loaded once at startup; there is no
-//! hot reload.
+//! TOML startup configuration. Loaded once at startup; there is no hot
+//! reload.
 
 use std::collections::HashSet;
 use std::fs;

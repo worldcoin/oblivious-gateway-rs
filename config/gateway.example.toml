@@ -39,8 +39,8 @@ allowed_targets = ["api.example.com", "internal.example.com:8443"]
 
 # At least one key generation is required. Each generation derives one
 # X25519 key and one X-Wing key from a single master seed; both keys need
-# distinct, stable identifiers. See docs/adr/0001-preserve-x25519-seed-derivation.md
-# for why the X25519 key uses a transformed copy of the seed.
+# distinct, stable identifiers. See GLOSSARY.md for why the X25519 key
+# uses a transformed copy of the seed.
 [[generations]]
 x25519_key_id = 0
 xwing_key_id = 1

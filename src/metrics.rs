@@ -1,6 +1,5 @@
-//! Prometheus metrics via the `metrics` facade (DESIGN.md: "Use the Rust
-//! `metrics` facade with a Prometheus scrape exporter"), served on a
-//! separate, independently configurable listener.
+//! Prometheus metrics via the `metrics` facade, served on a separate,
+//! independently configurable listener.
 //!
 //! Labels are kept low-cardinality and free of request content: route,
 //! outcome, status class, KEM and key ID (0-255, so bounded) only. No URLs,
@@ -21,8 +20,7 @@ async fn render(State(handle): State<PrometheusHandle>) -> String {
 }
 
 /// Install the global Prometheus recorder and serve it on its own listener
-/// and path (DESIGN.md: "Serve `/metrics` on a separate configurable
-/// listener"). Must be called from within a Tokio runtime; the listener
+/// and path. Must be called from within a Tokio runtime; the listener
 /// itself is spawned as a background task and outlives this function.
 pub fn install(listen_addr: &str, path: &str) -> Result<(), StartupError> {
     let addr: SocketAddr = listen_addr
@@ -123,7 +121,7 @@ impl Drop for RequestMetrics {
 
 /// Records one upstream (target) request's duration and the encrypted
 /// payload's target status class, tracked separately from the outer HTTP
-/// status per DESIGN.md.
+/// status.
 pub fn record_upstream(duration_secs: f64, outcome: &'static str) {
     metrics::histogram!("ohttp_gateway_upstream_duration_seconds", "outcome" => outcome)
         .record(duration_secs);

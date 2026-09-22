@@ -17,7 +17,7 @@ use crate::gateway::AppState;
 
 /// Build the gateway's router: `/gateway`, `/ohttp-keys` and `/health` at
 /// their configured paths. Unknown routes fall through to axum's default
-/// 404 (DESIGN.md).
+/// 404.
 pub fn build_router(state: Arc<AppState>, server: &ServerConfig) -> Router {
     Router::new()
         .route(&server.gateway_path, post(gateway::gateway_handler))
