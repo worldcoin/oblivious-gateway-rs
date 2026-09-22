@@ -73,7 +73,7 @@ KEM, key ID, status class — never URLs/headers/bodies/seeds):
 ```sh
 cargo build --locked && cargo test --locked
 cargo fmt --all -- --check && cargo clippy --all-targets -- -D warnings
-cargo deny check licenses
+cargo deny check licenses && cargo deny check bans sources && cargo deny check advisories
 
 docker build -t oblivious-gateway .
 docker run --rm -p 8080:8080 -p 9090:9090 \
@@ -88,6 +88,21 @@ fixture, config validation, full X25519/X-Wing round trips, allowlist/
 redirect/rewrite behavior, decrypt-only generations, telemetry, and
 TLS/mTLS accept/reject. Docker image: Debian builder (for `aws-lc-rs`) →
 `distroless/cc` nonroot runtime.
+
+## CI and releases
+
+`.github/workflows/ci.yml` runs fmt/clippy, build/test, `cargo deny`
+(licenses/bans/sources hard-gated, advisories soft-gated since a new
+RUSTSEC entry with no fix yet shouldn't block unrelated PRs), and a
+Docker build-and-health-check, all on our self-hosted runners.
+`validate-pr.yml` enforces conventional-commit PR titles.
+
+This repo is private and does not publish to GHCR or any public
+registry. `ecr-release.yaml` publishes to our own private ECR on a
+published GitHub Release tagged `vX.Y.Z`, via the shared
+`worldcoin/gh-actions/ecr-build-and-push` action (same pattern as
+`world-chain-rundler`). **The target ECR repository does not exist
+yet** — create it before cutting the first release.
 
 ## Known limitations
 
@@ -106,8 +121,9 @@ TLS/mTLS accept/reject. Docker image: Debian builder (for `aws-lc-rs`) →
   reference; not in accepted v0 scope, so not closed here.
 - **No hot reload / scheduled rotation** — restart-based only, by design.
 - **No performance/throughput target** — deferred at design time.
-- **No `cargo audit`/advisory scanning** — license allow-list is CI-gated
-  (`deny.toml`), known-vulnerability scanning is not, yet.
+- **Advisory scanning is soft-gated** — `cargo deny check advisories` runs
+  in CI but `continue-on-error`, so a new RUSTSEC entry is visible but
+  doesn't block merges (licenses/bans/sources are hard-gated).
 - **No outbound response size cap** — full target response is buffered
   before re-encoding, matching Go.
 

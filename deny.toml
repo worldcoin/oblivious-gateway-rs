@@ -1,11 +1,24 @@
-# cargo-deny license gate (DESIGN.md: "review dependency licenses before
-# distribution"). Run locally with `cargo deny check licenses`, or via the
-# `deny` CI job. Only permissive licenses are allowed; nothing copyleft.
+# cargo-deny gate: licenses (DESIGN.md: "review dependency licenses before
+# distribution"), banned/duplicate dependencies, source registries, and
+# security advisories. CI runs these as two jobs matching the org
+# convention (see .github/workflows/ci.yml): `licenses`/`bans`/`sources`
+# are a hard gate, `advisories` is soft (continue-on-error) since a new
+# RUSTSEC entry can appear for a dependency with no fix available yet and
+# shouldn't silently block unrelated pull requests.
+#
+# Run locally: `cargo deny check licenses`, `cargo deny check bans sources`,
+# `cargo deny check advisories`.
+
+[advisories]
+# No ignored advisories at present. If one needs to be temporarily
+# accepted (e.g. no upgrade path exists yet), add its RUSTSEC ID here with
+# a comment explaining why and a link to tracking the fix.
+ignore = []
+
+[licenses]
 # A dependency licensed under one of these OR a disallowed license (e.g.
 # "MIT OR GPL-3.0") still passes, since cargo-deny only requires one
 # satisfiable option from the allow-list.
-
-[licenses]
 allow = [
     "MIT",
     "Apache-2.0",
