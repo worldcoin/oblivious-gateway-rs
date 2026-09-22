@@ -49,7 +49,7 @@ advertise = true
 # Seed material should come from an environment variable or a mounted file
 # in production; inline hex seeds are intended for local testing only.
 [generations.seed]
-env = "OBLIVIOUS_GATEWAY_SEED_GEN0"
+env = "OBLIVIOUS_GATEWAY_SEED"
 
 # Example of a retained-but-not-advertised generation during rotation:
 # [[generations]]
@@ -57,4 +57,4 @@ env = "OBLIVIOUS_GATEWAY_SEED_GEN0"
 # xwing_key_id = 3
 # advertise = false
 # [generations.seed]
-# file = "/run/secrets/oblivious-gateway-seed-gen1"
+# file = "/run/secrets/oblivious-gateway-seed-2"

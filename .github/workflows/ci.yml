@@ -146,7 +146,7 @@ jobs:
         run: |
           seed="$(openssl rand -hex 32)"
           docker run -d --name oblivious-gateway-ci \
-            -e OBLIVIOUS_GATEWAY_SEED_GEN0="$seed" \
+            -e OBLIVIOUS_GATEWAY_SEED="$seed" \
             -v "$PWD/config/gateway.example.toml:/etc/oblivious-gateway/gateway.toml:ro" \
             -p 8080:8080 \
             oblivious-gateway:ci

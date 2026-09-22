@@ -2,20 +2,27 @@ oblivious-gateway-rs
 Copyright (c) 2026, Tools for Humanity
 
 This project is an independent Rust implementation of an Oblivious HTTP
-(RFC 9458) gateway. It does not contain source code copied from Cloudflare's
-`privacy-gateway-server-go`, but its behavior was deliberately modeled on
-that project as a functional reference, and its X25519 key-derivation
-transform is intentionally byte-for-byte compatible with it (see
-`docs/adr/0001-preserve-x25519-seed-derivation.md`). Portions of this
-project's behavior are therefore adapted from:
+(RFC 9458) gateway, built to the RFC directly rather than as a port of any
+other implementation. It contains no source code copied from Cloudflare's
+`privacy-gateway-server-go`, and its design and feature set have since
+diverged from and in several respects gone beyond it (native X-Wing rather
+than a draft KEM, optional direct mTLS, RFC-9458-aligned status codes,
+hardened outbound URL/Host handling, multi-generation key rotation).
+
+One specific behavior is a deliberate, narrow exception: this project's
+X25519 key derivation reproduces `privacy-gateway-server-go`'s legacy
+derivation input byte-for-byte (see `GLOSSARY.md`), so an operator who
+reuses an existing seed keeps the same public key for clients that already
+embed or cache it. This project also uses the same BSD-3-Clause license as
+that project, as a deliberate choice, not because any of its code was
+reused:
 
   privacy-gateway-server-go
   Copyright (c) 2022, Cloudflare, Inc.
   Licensed under the BSD 3-Clause License.
   https://github.com/cloudflare/privacy-gateway-server-go
 
-See LICENSE for this project's license terms (BSD 3-Clause, matching the
-reference implementation above).
+See LICENSE for this project's own license terms.
 
 Third-party Rust crate dependency licenses were reviewed via `cargo
 metadata` against the locked dependency graph (`Cargo.lock`). Every

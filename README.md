@@ -10,18 +10,16 @@ translates the enclosed [Binary HTTP](https://www.rfc-editor.org/rfc/rfc9292.htm
 message to an ordinary HTTP request, forwards it to an allowlisted target,
 and encapsulates the response.
 
-Independent implementation, functionally modeled on Cloudflare's
-[`privacy-gateway-server-go`](https://github.com/cloudflare/privacy-gateway-server-go)
-(BSD-3-Clause; see `NOTICE`), with a deliberately Go-compatible X25519 key
-derivation. See [`GLOSSARY.md`](GLOSSARY.md) for terminology and where we
-knowingly diverge from the Go reference or from RFC 9458 itself. Not
-published, deployed, or load-tested.
+Independent implementation; see `NOTICE` for its relationship to
+Cloudflare's [`privacy-gateway-server-go`](https://github.com/cloudflare/privacy-gateway-server-go)
+and [`GLOSSARY.md`](GLOSSARY.md) for terminology. Not published, deployed,
+or load-tested.
 
 ## Quickstart
 
 ```sh
 cp config/gateway.example.toml config/gateway.toml
-export OBLIVIOUS_GATEWAY_SEED_GEN0=$(openssl rand -hex 32)
+export OBLIVIOUS_GATEWAY_SEED=$(openssl rand -hex 32)
 cargo run -- --config config/gateway.toml
 ```
 
@@ -76,7 +74,7 @@ cargo deny check licenses && cargo deny check bans sources && cargo deny check a
 
 docker build -t oblivious-gateway .
 docker run --rm -p 8080:8080 -p 9090:9090 \
-  -e OBLIVIOUS_GATEWAY_SEED_GEN0=<hex seed> \
+  -e OBLIVIOUS_GATEWAY_SEED=<hex seed> \
   -v "$(pwd)/config/gateway.toml:/etc/oblivious-gateway/gateway.toml:ro" \
   oblivious-gateway
 ```
@@ -128,5 +126,5 @@ yet** — create it before cutting the first release.
 
 ## License
 
-BSD-3-Clause. See `LICENSE` and `NOTICE` (functional relationship to the
-Go reference and the dependency license review).
+BSD-3-Clause. See `LICENSE` and `NOTICE` (relationship to the Go reference
+and the dependency license review).

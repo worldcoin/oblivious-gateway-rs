@@ -6,22 +6,19 @@
 FROM rust:1-slim-bookworm AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    cmake \
-    clang \
-    pkg-config \
-    && rm -rf /var/lib/apt/lists/*
+  build-essential \
+  cmake \
+  clang \
+  pkg-config \
+  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build
 COPY Cargo.toml Cargo.lock ./
 COPY src ./src
 
 RUN cargo build --release --locked && \
-    strip target/release/oblivious-gateway
+  strip target/release/oblivious-gateway
 
-# Runtime stage: distroless, no shell, matching the Go reference's
-# deployment posture (docs/OHTTP_GATEWAY_ANALYSIS.md: "distroless and
-# exposes 8080").
 FROM gcr.io/distroless/cc-debian12:nonroot
 
 COPY --from=builder /build/target/release/oblivious-gateway /usr/local/bin/oblivious-gateway
