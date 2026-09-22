@@ -52,8 +52,7 @@ pub struct BinaryHttpRequest {
     pub body: Vec<u8>,
 }
 
-/// Decode a known-length BHTTP request, matching RFC 9292 §3.3 / Go's
-/// `ohttp.UnmarshalBinaryRequest`.
+/// Decode a known-length BHTTP request
 ///
 /// # Errors
 ///
@@ -146,7 +145,7 @@ pub fn decode_request(bytes: &[u8]) -> Result<BinaryHttpRequest, PayloadError> {
 }
 
 /// Encode an ordinary HTTP status/headers/body triple back into a
-/// known-length BHTTP response, matching Go's `ohttp.CreateBinaryResponse`.
+/// known-length BHTTP response
 ///
 /// # Panics
 ///

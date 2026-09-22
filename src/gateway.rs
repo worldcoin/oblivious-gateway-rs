@@ -89,6 +89,7 @@ pub async fn gateway_handler(State(state): State<Arc<AppState>>, request: Reques
     let Some(server) = state.key_ring.server_for(key_id) else {
         return outer_error(&mut metrics, OuterError::ConfigMismatch);
     };
+
     metrics.set_kem(state.key_ring.kem_label(key_id));
     metrics.set_key_id(key_id);
 
@@ -170,7 +171,7 @@ pub async fn keys_handler(State(state): State<Arc<AppState>>) -> Response {
     metrics.set_outcome("success");
     metrics.set_outer_status(200);
 
-    // Randomized 12-36h private cache lifetime, matching the Go reference.
+    // Randomized 12-36h private cache lifetime
     let max_age = 12 * 3600 + rand::random_range(0..24 * 3600);
 
     (
