@@ -3,8 +3,8 @@
 //! separate, independently configurable listener.
 //!
 //! Labels are kept low-cardinality and free of request content: route,
-//! outcome, status class, KEM and key ID only. No URLs, headers, bodies,
-//! seeds or client identifiers are recorded.
+//! outcome, status class, KEM and key ID (0-255, so bounded) only. No URLs,
+//! headers, bodies, seeds or client identifiers are recorded.
 
 use std::net::SocketAddr;
 use std::time::Instant;
@@ -50,13 +50,15 @@ pub fn install(listen_addr: &str, path: &str) -> Result<(), StartupError> {
 
 /// RAII guard that records the gateway request counter, duration histogram
 /// and in-flight gauge exactly once per outer request, regardless of which
-/// return path is taken.
+/// return path is taken. Every label is a fixed, bounded string (outcome
+/// names, KEM names, key IDs 0-255): none of them carry request content.
 pub struct RequestMetrics {
     route: &'static str,
     started_at: Instant,
-    outcome: String,
+    outcome: &'static str,
     outer_status: u16,
-    kem: String,
+    kem: &'static str,
+    key_id: Option<u8>,
 }
 
 impl RequestMetrics {
@@ -65,18 +67,23 @@ impl RequestMetrics {
         Self {
             route,
             started_at: Instant::now(),
-            outcome: "unknown".to_string(),
+            outcome: "unknown",
             outer_status: 0,
-            kem: "unknown".to_string(),
+            kem: "unknown",
+            key_id: None,
         }
     }
 
-    pub fn set_outcome(&mut self, outcome: &str) {
-        self.outcome = outcome.to_string();
+    pub fn set_outcome(&mut self, outcome: &'static str) {
+        self.outcome = outcome;
     }
 
-    pub fn set_kem(&mut self, kem: &str) {
-        self.kem = kem.to_string();
+    pub fn set_kem(&mut self, kem: &'static str) {
+        self.kem = kem;
+    }
+
+    pub fn set_key_id(&mut self, key_id: u8) {
+        self.key_id = Some(key_id);
     }
 
     pub fn set_outer_status(&mut self, status: u16) {
@@ -88,21 +95,27 @@ impl Drop for RequestMetrics {
     fn drop(&mut self) {
         metrics::gauge!("ohttp_gateway_in_flight", "route" => self.route).decrement(1.0);
 
-        let status = self.outer_status.to_string();
+        let outer_status = self.outer_status.to_string();
+        let key_id = self
+            .key_id
+            .map_or_else(|| "none".to_string(), |id| id.to_string());
+
         metrics::counter!(
             "ohttp_gateway_requests_total",
             "route" => self.route,
-            "outcome" => self.outcome.clone(),
-            "outer_status" => status.clone(),
-            "kem" => self.kem.clone(),
+            "outcome" => self.outcome,
+            "outer_status" => outer_status,
+            "kem" => self.kem,
+            "key_id" => key_id.clone(),
         )
         .increment(1);
 
         metrics::histogram!(
             "ohttp_gateway_request_duration_seconds",
             "route" => self.route,
-            "outcome" => self.outcome.clone(),
-            "kem" => self.kem.clone(),
+            "outcome" => self.outcome,
+            "kem" => self.kem,
+            "key_id" => key_id,
         )
         .record(self.started_at.elapsed().as_secs_f64());
     }
@@ -111,8 +124,8 @@ impl Drop for RequestMetrics {
 /// Records one upstream (target) request's duration and the encrypted
 /// payload's target status class, tracked separately from the outer HTTP
 /// status per DESIGN.md.
-pub fn record_upstream(duration_secs: f64, outcome: &str) {
-    metrics::histogram!("ohttp_gateway_upstream_duration_seconds", "outcome" => outcome.to_string())
+pub fn record_upstream(duration_secs: f64, outcome: &'static str) {
+    metrics::histogram!("ohttp_gateway_upstream_duration_seconds", "outcome" => outcome)
         .record(duration_secs);
 }
 

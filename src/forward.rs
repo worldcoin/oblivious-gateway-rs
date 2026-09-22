@@ -8,12 +8,24 @@
 //! to choose subsequent destinations, including internal ones.
 
 use std::collections::{HashMap, HashSet};
+use std::time::Duration;
 
 use reqwest::{Client, Method};
 
 use crate::bhttp::InnerRequest;
 use crate::config::{ForwardingConfig, RewriteTarget};
 use crate::error::PayloadError;
+
+/// Bounded upper limits on an outbound request, so one slow or unresponsive
+/// target cannot hold a connection (and its in-flight request) open
+/// indefinitely. The Go reference and reqwest's own defaults have no such
+/// bound; this is a deliberate departure from "use library defaults" for
+/// this one setting, per the organization's mandatory bounded-remote-call
+/// timeout rule. Not currently operator-configurable (v0 keeps timeout
+/// *configuration* deferred, per DESIGN.md); only the hardcoded default
+/// changes.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub struct Forwarder {
     client: Client,
@@ -28,6 +40,8 @@ impl Forwarder {
         // reimplementing redirect handling. Outbound HTTPS uses reqwest's
         // normal certificate validation.
         let client = Client::builder()
+            .connect_timeout(CONNECT_TIMEOUT)
+            .timeout(REQUEST_TIMEOUT)
             .build()
             .expect("reqwest client with default configuration cannot fail to build");
 
@@ -73,7 +87,16 @@ impl Forwarder {
             .headers(inner.headers.clone())
             .body(inner.body.clone());
 
-        request.send().await.map_err(|_| PayloadError::TargetFailed)
+        request.send().await.map_err(|err| {
+            tracing::warn!(
+                error = %err,
+                authority = %inner.authority,
+                timed_out = err.is_timeout(),
+                is_connect = err.is_connect(),
+                "target request failed"
+            );
+            PayloadError::TargetFailed
+        })
     }
 
     /// Forward the decapsulated request to its target, returning the
@@ -85,11 +108,10 @@ impl Forwarder {
         let response = self.send(inner).await?;
         let status = response.status().as_u16();
         let headers = response.headers().clone();
-        let body = response
-            .bytes()
-            .await
-            .map_err(|_| PayloadError::TargetFailed)?
-            .to_vec();
-        Ok((status, headers, body))
+        let body = response.bytes().await.map_err(|err| {
+            tracing::warn!(error = %err, authority = %inner.authority, "reading target response body failed");
+            PayloadError::TargetFailed
+        })?;
+        Ok((status, headers, body.to_vec()))
     }
 }

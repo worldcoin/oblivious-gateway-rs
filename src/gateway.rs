@@ -56,17 +56,24 @@ pub async fn gateway_handler(
         return outer_error(&mut metrics, OuterError::ConfigMismatch);
     };
     metrics.set_kem(state.key_ring.kem_label(key_id));
+    metrics.set_key_id(key_id);
 
     let (request_bytes, response_context) = match server.decapsulate(&body) {
         Ok(v) => v,
-        Err(_) => return outer_error(&mut metrics, OuterError::DecapsulationFailed),
+        Err(err) => {
+            tracing::warn!(error = ?err, key_id, "OHTTP decapsulation failed");
+            return outer_error(&mut metrics, OuterError::DecapsulationFailed);
+        }
     };
 
     let response_bytes = handle_inner_request(&state, &request_bytes, &mut metrics).await;
 
     let encapsulated = match response_context.encapsulate(&response_bytes) {
         Ok(v) => v,
-        Err(_) => return outer_error(&mut metrics, OuterError::EncapsulationFailed),
+        Err(err) => {
+            tracing::warn!(error = ?err, key_id, "OHTTP encapsulation failed");
+            return outer_error(&mut metrics, OuterError::EncapsulationFailed);
+        }
     };
 
     metrics.set_outer_status(200);

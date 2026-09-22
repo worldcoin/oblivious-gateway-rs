@@ -107,6 +107,10 @@ async fn gateway_request_updates_prometheus_counters() {
         rendered.contains("kem=\"x25519\""),
         "missing kem label:\n{rendered}"
     );
+    assert!(
+        rendered.contains("key_id=\"0\""),
+        "missing key_id label:\n{rendered}"
+    );
 
     // No request content should ever appear in telemetry.
     assert!(!rendered.contains("example.invalid"));

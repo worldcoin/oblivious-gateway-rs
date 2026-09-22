@@ -166,11 +166,15 @@ assumed to match the Go reference:
   request body) enforces its documented default 2 MiB limit; this is not
   configurable in v0. The Go reference has no body-size cap at all, so
   this is a stricter default, not a looser one.
-- **Timeouts**: the outbound `reqwest::Client` uses no default connect or
-  overall request timeout, and the inbound `axum`/`axum-server` listener
-  has no default read/write timeout — matching the Go reference's
-  `http.Client{}` / `http.ListenAndServe`, which also have none. Custom
-  timeout configuration is deferred to a follow-up.
+- **Timeouts**: the outbound `reqwest::Client` uses a hardcoded 10s connect
+  / 30s overall request timeout (`src/forward.rs`) rather than reqwest's
+  unbounded default. This is a deliberate departure from "use library
+  defaults" for this one setting: an unbounded outbound call is a
+  resource-exhaustion risk (a stalled target would otherwise hold an
+  in-flight request, and its OHTTP response context, open indefinitely).
+  The inbound `axum`/`axum-server` listener still has no read/write
+  timeout, matching the Go reference. Operator-configurable timeouts
+  remain deferred to a follow-up; only the hardcoded default changed.
 - **Redirects**: `reqwest`'s default redirect policy is a limit of 10
   hops (verified against its 0.13.5 source), not Go's default client
   behavior exactly, but both are finite. The allowlist is checked only
@@ -180,10 +184,19 @@ assumed to match the Go reference:
   behave this way.
 - **No hot reload or scheduled rotation**: configuration and keys load
   once at startup; rotation is a manual, restart-based runbook (above).
-- **No SSRF/DNS/address-family policy**: exact host allowlisting does not
-  prevent an allowed hostname resolving to a private or link-local
-  address, matching the Go reference's posture; this is unchanged v0
-  scope, not a regression.
+- **No SSRF protection beyond exact hostname matching**: `allowed_targets`
+  matches the request's `Host` string exactly, but never resolves it and
+  checks the resulting IP. An allowlisted hostname that resolves (now, or
+  later via DNS rebinding) to a private, link-local, or cloud metadata
+  address is forwarded to without complaint — the same gap the Go
+  reference has, and it wasn't in the accepted v0 delivery scope, so it
+  wasn't closed here. This is separate from, and narrower than, the
+  redirect-trust behavior in ADR 0002 (which *is* an explicit, accepted
+  decision): here the exposure is on the operator-approved hostname
+  itself, not just where it might redirect afterward. Closing it would
+  mean resolving the hostname before connecting and rejecting
+  private/link-local/loopback/metadata-range results — a reasonable,
+  scoped follow-up if operators need it, but not implemented.
 - **No numerical performance/throughput acceptance criteria**: deferred at
   the design stage; only "avoid unnecessary serialization" was targeted,
   not benchmarked.
