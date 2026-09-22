@@ -22,6 +22,12 @@ async fn render(State(handle): State<PrometheusHandle>) -> String {
 /// Install the global Prometheus recorder and serve it on its own listener
 /// and path. Must be called from within a Tokio runtime; the listener
 /// itself is spawned as a background task and outlives this function.
+///
+/// # Errors
+///
+/// Returns [`StartupError::Config`] if `listen_addr` doesn't parse as a
+/// socket address, or if installing the global Prometheus recorder fails
+/// (e.g. one is already installed).
 pub fn install(listen_addr: &str, path: &str) -> Result<(), StartupError> {
     let addr: SocketAddr = listen_addr
         .parse()
@@ -60,6 +66,9 @@ pub struct RequestMetrics {
 }
 
 impl RequestMetrics {
+    /// Start timing one request to `route`, incrementing its in-flight
+    /// gauge. The counters/histogram are recorded on drop.
+    #[must_use]
     pub fn start(route: &'static str) -> Self {
         metrics::gauge!("ohttp_gateway_in_flight", "route" => route).increment(1.0);
         Self {
@@ -72,18 +81,22 @@ impl RequestMetrics {
         }
     }
 
+    /// Record why the request ended the way it did.
     pub fn set_outcome(&mut self, outcome: &'static str) {
         self.outcome = outcome;
     }
 
+    /// Record which KEM the request's key used.
     pub fn set_kem(&mut self, kem: &'static str) {
         self.kem = kem;
     }
 
+    /// Record which Key Identifier the request used.
     pub fn set_key_id(&mut self, key_id: u8) {
         self.key_id = Some(key_id);
     }
 
+    /// Record the plaintext outer HTTP status ultimately returned.
     pub fn set_outer_status(&mut self, status: u16) {
         self.outer_status = status;
     }
@@ -127,6 +140,8 @@ pub fn record_upstream(duration_secs: f64, outcome: &'static str) {
         .record(duration_secs);
 }
 
+/// Record the target's response status class (`2xx`..`5xx`/`other`),
+/// tracked separately from the outer HTTP status.
 pub fn record_target_status(status: u16) {
     let class = match status {
         200..=299 => "2xx",
@@ -138,6 +153,7 @@ pub fn record_target_status(status: u16) {
     metrics::counter!("ohttp_gateway_target_status_total", "status_class" => class).increment(1);
 }
 
+/// Set the loaded/advertised key gauges from the current [`KeyRing`](crate::keys::KeyRing).
 pub fn set_key_gauges(loaded: usize, advertised_x25519: usize, advertised_xwing: usize) {
     metrics::gauge!("ohttp_gateway_keys_loaded_total").set(loaded as f64);
     metrics::gauge!("ohttp_gateway_keys_advertised", "kem" => "x25519")

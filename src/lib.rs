@@ -1,3 +1,28 @@
+//! A standalone [RFC 9458](https://www.rfc-editor.org/rfc/rfc9458.html)
+//! Oblivious HTTP (OHTTP) gateway.
+//!
+//! The gateway decapsulates an encrypted OHTTP request, translates the
+//! [Binary HTTP](https://www.rfc-editor.org/rfc/rfc9292.html) message it
+//! protects into an ordinary HTTP request, forwards that request to an
+//! allowlisted [`Target Resource`](https://www.rfc-editor.org/rfc/rfc9458.html#name-terminology),
+//! and encapsulates the response. See the repository's `README.md` for
+//! operating documentation and `GLOSSARY.md` for terminology.
+//!
+//! # Module map
+//!
+//! - [`keys`]: master-seed key derivation and the decryption/advertisement
+//!   [`keys::KeyRing`].
+//! - [`config`]: the TOML startup configuration schema.
+//! - [`gateway`]: the `/gateway`, `/ohttp-keys` and `/health` HTTP
+//!   handlers, built into a [`Router`] by [`build_router`].
+//! - [`bhttp`]: translation between the wire format and ordinary HTTP.
+//! - [`forward`]: outbound allowlisting, rewrites, and the HTTP client
+//!   used to reach the Target Resource.
+//! - [`tls`]: incoming HTTPS/mTLS configuration.
+//! - [`metrics`]: Prometheus metrics via the `metrics` facade.
+//! - [`error`]: the outer/payload error split described in `GLOSSARY.md`.
+#![warn(missing_docs)]
+
 pub mod bhttp;
 pub mod config;
 pub mod error;

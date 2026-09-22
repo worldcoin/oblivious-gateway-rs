@@ -32,34 +32,51 @@ fn default_shutdown_grace_seconds() -> u64 {
     30
 }
 
+/// The parsed contents of the TOML startup configuration file.
 #[derive(Debug, Deserialize)]
 pub struct FileConfig {
+    /// Listener, endpoint path, and optional TLS settings.
     pub server: ServerConfig,
+    /// Prometheus metrics listener. Omit to disable metrics entirely.
     #[serde(default)]
     pub metrics: Option<MetricsConfig>,
+    /// Target allowlist and rewrites.
     #[serde(default)]
     pub forwarding: ForwardingConfig,
+    /// One or more key generations. At least one is required.
     pub generations: Vec<GenerationConfig>,
 }
 
+/// `[server]`: the gateway's own HTTP listener.
 #[derive(Debug, Deserialize)]
 pub struct ServerConfig {
+    /// Address to listen on, e.g. `"0.0.0.0:8080"`.
     pub listen_addr: String,
+    /// Path serving `POST /gateway`. Defaults to `/gateway`.
     #[serde(default = "default_gateway_path")]
     pub gateway_path: String,
+    /// Path serving `GET /ohttp-keys`. Defaults to `/ohttp-keys`.
     #[serde(default = "default_keys_path")]
     pub keys_path: String,
+    /// Path serving `GET /health`. Defaults to `/health`.
     #[serde(default = "default_health_path")]
     pub health_path: String,
+    /// How long to wait for in-flight requests to finish during shutdown,
+    /// before forcing the process to exit. Defaults to 30 seconds.
     #[serde(default = "default_shutdown_grace_seconds")]
     pub shutdown_grace_seconds: u64,
+    /// Optional incoming TLS/mTLS configuration. Omit to serve plaintext
+    /// HTTP, e.g. when TLS terminates at an upstream load balancer.
     #[serde(default)]
     pub tls: Option<TlsConfig>,
 }
 
+/// `[server.tls]`: incoming HTTPS, with optional mTLS.
 #[derive(Debug, Deserialize)]
 pub struct TlsConfig {
+    /// Path to the PEM-encoded server certificate (chain).
     pub cert_file: String,
+    /// Path to the PEM-encoded server private key.
     pub key_file: String,
     /// When set, incoming connections must present a certificate signed by
     /// this CA (direct mTLS). This extends the Go reference, which has no
@@ -68,17 +85,26 @@ pub struct TlsConfig {
     pub client_ca_file: Option<String>,
 }
 
+/// `[metrics]`: the separate Prometheus scrape listener.
 #[derive(Debug, Deserialize)]
 pub struct MetricsConfig {
+    /// Address to listen on, e.g. `"127.0.0.1:9090"`. Kept separate from
+    /// `server.listen_addr` so it can be bound to a different, typically
+    /// non-public, interface.
     pub listen_addr: String,
+    /// Scrape path. Defaults to `/metrics`.
     #[serde(default = "default_metrics_path")]
     pub path: String,
 }
 
+/// `[forwarding]`: which targets the gateway will forward decapsulated
+/// requests to, and how.
 #[derive(Debug, Deserialize, Default)]
 pub struct ForwardingConfig {
     /// Exact `host[:port]` allowlist, matched against the binary HTTP
     /// request's Host, matching the Go reference's `req.Host` comparison.
+    /// Required to be non-empty unless the process is started with
+    /// `--allow-any-target`.
     #[serde(default)]
     pub allowed_targets: Vec<String>,
     /// Scheme/host rewrites applied after the allowlist check, matching the
@@ -87,25 +113,40 @@ pub struct ForwardingConfig {
     pub rewrites: std::collections::HashMap<String, RewriteTarget>,
 }
 
+/// One `[forwarding.rewrites]` entry: replace the request's scheme and
+/// host with these before forwarding.
 #[derive(Debug, Deserialize, Clone)]
 pub struct RewriteTarget {
+    /// Replacement scheme, e.g. `"https"`.
     pub scheme: String,
+    /// Replacement `host[:port]`.
     pub host: String,
 }
 
+/// One `[[generations]]` entry: a Key Generation (see `GLOSSARY.md`) —
+/// one X25519 key and one X-Wing key derived from a single master seed.
 #[derive(Debug, Deserialize)]
 pub struct GenerationConfig {
+    /// Key Identifier for this generation's X25519 key. Must be unique
+    /// across every generation's `x25519_key_id` and `xwing_key_id`.
     pub x25519_key_id: u8,
+    /// Key Identifier for this generation's X-Wing key. Must be unique
+    /// across every generation's `x25519_key_id` and `xwing_key_id`.
     pub xwing_key_id: u8,
+    /// Whether this generation's public Key Configurations appear in
+    /// `/ohttp-keys`. Every loaded generation can still decrypt regardless
+    /// of this flag; setting it to `false` supports decrypt-only rotation.
+    /// Defaults to `true`.
     #[serde(default = "default_advertise")]
     pub advertise: bool,
+    /// Where this generation's master seed comes from.
     pub seed: SeedSource,
 }
 
 /// Where a generation's master seed comes from. Ordinary settings live in
-/// the TOML file, but per ADR context, seed material may still come from an
-/// environment variable or a mounted file so it need not be written to disk
-/// in the configuration itself.
+/// the TOML file, but seed material may still come from an environment
+/// variable or a mounted file so it need not be written to disk in the
+/// configuration itself.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SeedSource {
@@ -120,6 +161,12 @@ pub enum SeedSource {
 }
 
 impl SeedSource {
+    /// Resolve this source to the raw seed bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StartupError::Key`] if the environment variable is unset,
+    /// the file can't be read, or the resolved text isn't valid hex.
     pub fn resolve(&self) -> Result<Vec<u8>, StartupError> {
         let hex_str = match self {
             Self::Hex(s) => s.clone(),
@@ -135,6 +182,15 @@ impl SeedSource {
 }
 
 impl FileConfig {
+    /// Load and validate the TOML configuration file at `path`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StartupError::Config`] if the file can't be read or
+    /// parsed, or if it fails validation (duplicate key IDs, an empty
+    /// generation list, colliding endpoint paths). Returns
+    /// [`StartupError::Tls`] if `[server.tls]` references a missing
+    /// certificate, key, or client CA file.
     pub fn load(path: &Path) -> Result<Self, StartupError> {
         let raw = fs::read_to_string(path)?;
         let config: Self = toml::from_str(&raw)

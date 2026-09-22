@@ -82,7 +82,7 @@ fn load_key(path: &str) -> PrivateKeyDer<'static> {
 }
 
 async fn start_gateway_tls(tls_config: &TlsConfig) -> SocketAddr {
-    let rustls_config = oblivious_gateway::tls::build(tls_config).await.unwrap();
+    let rustls_config = oblivious_gateway::tls::build(tls_config).unwrap();
 
     let key_ring =
         oblivious_gateway::keys::KeyRing::load(&[oblivious_gateway::config::GenerationConfig {

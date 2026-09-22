@@ -2,7 +2,7 @@
 //!
 //! Each generation derives its X-Wing key from the operator's master seed
 //! unmodified, and its X25519 key from a copy of that seed with the final
-//! byte XORed with `0xff`. This reproduces the Go gateway's legacy X25519
+//! byte `XORed` with `0xff`. This reproduces the Go gateway's legacy X25519
 //! derivation input byte-for-byte, so embedded client configurations that
 //! predate this rewrite keep working when operators reuse the same seed
 //! and key identifier (see GLOSSARY.md). Both KEMs use HKDF-SHA256 +
@@ -34,14 +34,26 @@ fn x25519_seed_transform(seed: &[u8]) -> Vec<u8> {
 /// One operator-managed pair of gateway keys derived from a single master
 /// seed ("Key Generation" in GLOSSARY.md).
 pub struct Generation {
+    /// Key Identifier of this generation's X25519 key.
     pub x25519_key_id: KeyId,
+    /// Key Identifier of this generation's X-Wing key.
     pub xwing_key_id: KeyId,
+    /// Whether this generation's Key Configurations are advertised.
     pub advertise: bool,
+    /// This generation's X25519 Key Configuration (with private key).
     pub x25519_config: KeyConfig,
+    /// This generation's X-Wing Key Configuration (with private key).
     pub xwing_config: KeyConfig,
 }
 
 impl Generation {
+    /// Resolve the seed and derive both keys for one `[[generations]]`
+    /// entry.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StartupError::Key`] if the seed can't be resolved, is
+    /// shorter than [`MIN_SEED_LEN`], or either key fails to derive.
     fn from_config(cfg: &GenerationConfig) -> Result<Self, StartupError> {
         let seed = cfg
             .seed
@@ -90,6 +102,13 @@ pub struct KeyRing {
 }
 
 impl KeyRing {
+    /// Derive every generation's keys and build the key ring.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StartupError::Key`] if any generation's seed or key
+    /// derivation fails, or if encoding the advertised configuration list
+    /// fails.
     pub fn load(generations: &[GenerationConfig]) -> Result<Self, StartupError> {
         let mut servers = HashMap::new();
         let mut kem_by_key_id = HashMap::new();
@@ -139,10 +158,14 @@ impl KeyRing {
         })
     }
 
+    /// Number of X25519 Key Configurations currently advertised.
+    #[must_use]
     pub fn advertised_x25519_count(&self) -> usize {
         self.advertised_x25519_count
     }
 
+    /// Number of X-Wing Key Configurations currently advertised.
+    #[must_use]
     pub fn advertised_xwing_count(&self) -> usize {
         self.advertised_xwing_count
     }
@@ -151,10 +174,13 @@ impl KeyRing {
     /// caller has only peeked the identifier; `Server::decapsulate` still
     /// independently validates the identifier, KEM and symmetric suite
     /// carried in the request header.
+    #[must_use]
     pub fn server_for(&self, key_id: KeyId) -> Option<Arc<Server>> {
         self.servers.get(&key_id).cloned()
     }
 
+    /// `"x25519"`, `"xwing"`, or `"unknown"` — a bounded label for metrics.
+    #[must_use]
     pub fn kem_label(&self, key_id: KeyId) -> &'static str {
         self.kem_by_key_id
             .get(&key_id)
@@ -164,10 +190,14 @@ impl KeyRing {
 
     /// RFC 9458 `application/ohttp-keys` wire format for every advertised
     /// generation.
+    #[must_use]
     pub fn advertised_configs(&self) -> &[u8] {
         &self.advertised_configs
     }
 
+    /// Total number of loaded keys (both KEMs, across every generation),
+    /// regardless of whether they're advertised.
+    #[must_use]
     pub fn loaded_key_count(&self) -> usize {
         self.servers.len()
     }
@@ -177,12 +207,13 @@ impl KeyRing {
 mod tests {
     use super::*;
 
-    /// Go-derived fixture: for seed `0x00..=0x1f` (XORing the last byte to
+    /// Go-derived fixture: for seed `0x00..=0x1f` (`XORing` the last byte to
     /// `0xff` per the legacy transform) and key identifier 7, the Go
     /// reference (`ohttp-go` + CIRCL 1.6.3, `KEM_X25519_HKDF_SHA256`)
     /// produces this exact `PublicConfig.Marshal()` output. Captured by
-    /// running the vendored Go module directly; see the implementation
-    /// handoff notes for how to regenerate it.
+    /// building the vendored Go module directly and calling
+    /// `ohttp.NewConfigFromSeed` with this seed, then hex-encoding
+    /// `PublicConfig.Marshal()`.
     const GO_X25519_FIXTURE_HEX: &str =
         "070020cdaed74e78bad692aa8125c176aed5513a071c06cda792472e1728db92efe356000400010001";
 

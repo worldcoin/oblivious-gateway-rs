@@ -26,6 +26,7 @@ use crate::error::PayloadError;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// Forwards decapsulated binary HTTP requests to their allowlisted target.
 pub struct Forwarder {
     client: Client,
     allowed_targets: Option<HashSet<String>>,
@@ -33,6 +34,15 @@ pub struct Forwarder {
 }
 
 impl Forwarder {
+    /// Build a `Forwarder` from `[forwarding]` config. `allow_any_target`
+    /// (from `--allow-any-target`) disables the allowlist entirely,
+    /// regardless of `config.allowed_targets`.
+    ///
+    /// # Panics
+    ///
+    /// Never in practice: the only fallible step is building a `reqwest`
+    /// client with a fixed, always-valid configuration.
+    #[must_use]
     pub fn new(config: &ForwardingConfig, allow_any_target: bool) -> Self {
         // Rely on the client's own default redirect policy (reqwest:
         // `Policy::limited(10)`, verified against 0.13.5 source) rather than
@@ -100,6 +110,13 @@ impl Forwarder {
 
     /// Forward the binary HTTP request to its target, returning the
     /// upstream status, headers and body on success.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PayloadError::Forbidden`] if the target isn't allowlisted,
+    /// [`PayloadError::Malformed`] if its method isn't valid HTTP, or
+    /// [`PayloadError::TargetFailed`] if the request couldn't be sent or
+    /// its response couldn't be read.
     pub async fn forward(
         &self,
         request: &BinaryHttpRequest,

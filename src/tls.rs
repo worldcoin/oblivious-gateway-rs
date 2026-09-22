@@ -32,7 +32,13 @@ fn load_private_key(path: &str) -> Result<PrivateKeyDer<'static>, StartupError> 
 /// Build the incoming TLS acceptor configuration. When `client_ca_file` is
 /// set, presenting a certificate signed by that CA is required to complete
 /// the handshake (direct mTLS).
-pub async fn build(config: &TlsConfig) -> Result<RustlsConfig, StartupError> {
+///
+/// # Errors
+///
+/// Returns [`StartupError::Tls`] if the certificate, key, or client CA
+/// files can't be read or parsed, or if building the underlying
+/// `rustls::ServerConfig` fails.
+pub fn build(config: &TlsConfig) -> Result<RustlsConfig, StartupError> {
     let certs = load_certs(&config.cert_file)?;
     let key = load_private_key(&config.key_file)?;
 

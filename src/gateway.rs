@@ -14,8 +14,12 @@ use crate::forward::Forwarder;
 use crate::keys::KeyRing;
 use crate::metrics::RequestMetrics;
 
+/// Shared state for the `/gateway`, `/ohttp-keys` and `/health` handlers.
 pub struct AppState {
+    /// Loaded/advertised keys, used to decapsulate requests and serve
+    /// `/ohttp-keys`.
     pub key_ring: KeyRing,
+    /// Outbound allowlist/rewrite/client used to reach the target.
     pub forwarder: Forwarder,
 }
 

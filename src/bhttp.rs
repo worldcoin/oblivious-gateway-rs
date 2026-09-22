@@ -36,16 +36,27 @@ fn is_hop_by_hop(name: &[u8]) -> bool {
 /// The binary HTTP request message (RFC 9458 §4.1) that an Encapsulated
 /// Request protects, decoded into its ordinary-HTTP parts.
 pub struct BinaryHttpRequest {
+    /// HTTP method, e.g. `GET`.
     pub method: Method,
+    /// Request scheme, e.g. `https`. Empty if the BHTTP message omitted it.
     pub scheme: String,
+    /// Request authority (`host[:port]`), matched against the allowlist.
     pub authority: String,
+    /// Request path, including any query string.
     pub path: String,
+    /// Request headers, with hop-by-hop headers already stripped.
     pub headers: HeaderMap,
+    /// Request body.
     pub body: Vec<u8>,
 }
 
 /// Decode a known-length BHTTP request, matching RFC 9292 §3.3 / Go's
 /// `ohttp.UnmarshalBinaryRequest`.
+///
+/// # Errors
+///
+/// Returns [`PayloadError::Malformed`] if `bytes` isn't a valid
+/// known-length BHTTP request, or its parts aren't valid HTTP.
 pub fn decode_request(bytes: &[u8]) -> Result<BinaryHttpRequest, PayloadError> {
     let mut cursor = Cursor::new(bytes);
     let message = Message::read_bhttp(&mut cursor).map_err(|_| PayloadError::Malformed)?;
@@ -92,6 +103,12 @@ pub fn decode_request(bytes: &[u8]) -> Result<BinaryHttpRequest, PayloadError> {
 
 /// Encode an ordinary HTTP status/headers/body triple back into a
 /// known-length BHTTP response, matching Go's `ohttp.CreateBinaryResponse`.
+///
+/// # Panics
+///
+/// Never in practice: the only fallible step falls back to a hardcoded
+/// `500`, which is always a valid BHTTP status code.
+#[must_use]
 pub fn encode_response(status: u16, headers: &HeaderMap, body: &[u8]) -> Vec<u8> {
     let status_code = StatusCode::try_from(status).unwrap_or_else(|_| {
         StatusCode::try_from(500u16).expect("500 is a valid BHTTP status code")
