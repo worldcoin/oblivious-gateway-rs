@@ -3,9 +3,9 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use axum::body::Bytes;
-use axum::extract::State;
-use axum::http::{header, HeaderMap, StatusCode};
+use axum::body::to_bytes;
+use axum::extract::{Request, State};
+use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
 
 use crate::bhttp;
@@ -22,6 +22,10 @@ pub struct AppState {
 const OHTTP_REQUEST_CONTENT_TYPE: &str = "message/ohttp-req";
 const OHTTP_RESPONSE_CONTENT_TYPE: &str = "message/ohttp-res";
 
+/// Matches axum's own default `Bytes` extractor limit (documented in
+/// README.md's "Known limitations"): 2 MiB.
+const MAX_ENCAPSULATED_REQUEST_BYTES: usize = 2 * 1024 * 1024;
+
 fn outer_error(metrics: &mut RequestMetrics, err: OuterError) -> Response {
     let status = err.status();
     metrics.set_outcome(err.outcome());
@@ -36,19 +40,36 @@ fn outer_error(metrics: &mut RequestMetrics, err: OuterError) -> Response {
 /// Response. Errors before decapsulation succeeds are plaintext outer
 /// errors; errors afterwards are carried inside the encrypted response with
 /// the outer status held at 200 (DESIGN.md, matching the Go reference).
-pub async fn gateway_handler(
-    State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
-    encapsulated_request: Bytes,
-) -> Response {
+pub async fn gateway_handler(State(state): State<Arc<AppState>>, request: Request) -> Response {
     let mut metrics = RequestMetrics::start("gateway");
+    let (parts, body) = request.into_parts();
 
-    let content_type = headers
+    // RFC 9458 §5.1: "The encapsulation does not permit progressive
+    // processing of responses"; §5.1.2: "Clients MUST NOT construct a
+    // request that includes a 100-continue expectation; the Oblivious
+    // Gateway Resource MUST generate an error if a 100-continue
+    // expectation is received." Checked before the body is ever polled:
+    // axum's `Bytes` extractor (and hyper generally) answers a 100-continue
+    // expectation automatically and transparently the moment the body is
+    // first read, which would violate this MUST before our own code could
+    // intervene. Using the raw `Request` and deferring body extraction
+    // lets us reject the expectation (and drop the connection, since we
+    // never send the interim response or drain the body) instead.
+    if parts.headers.contains_key(header::EXPECT) {
+        return outer_error(&mut metrics, OuterError::UnsupportedExpectation);
+    }
+
+    let content_type = parts
+        .headers
         .get(header::CONTENT_TYPE)
         .and_then(|v| v.to_str().ok());
     if content_type != Some(OHTTP_REQUEST_CONTENT_TYPE) {
         return outer_error(&mut metrics, OuterError::InvalidContentType);
     }
+
+    let Ok(encapsulated_request) = to_bytes(body, MAX_ENCAPSULATED_REQUEST_BYTES).await else {
+        return outer_error(&mut metrics, OuterError::InvalidContent);
+    };
 
     let Some(&key_id) = encapsulated_request.first() else {
         return outer_error(&mut metrics, OuterError::InvalidContent);

@@ -25,6 +25,12 @@ pub enum OuterError {
     InvalidContentType,
     #[error("failed to read request body")]
     InvalidContent,
+    /// RFC 9458 §5.1.2: "Clients MUST NOT construct a request that
+    /// includes a 100-continue expectation; the Oblivious Gateway
+    /// Resource MUST generate an error if a 100-continue expectation is
+    /// received."
+    #[error("unsupported expectation")]
+    UnsupportedExpectation,
     #[error("unknown key configuration")]
     ConfigMismatch,
     #[error("failed to decapsulate the Encapsulated Request")]
@@ -48,6 +54,7 @@ impl OuterError {
         match self {
             Self::InvalidContentType => "invalid_content_type",
             Self::InvalidContent => "invalid_content",
+            Self::UnsupportedExpectation => "unsupported_expectation",
             Self::ConfigMismatch => "config_mismatch",
             Self::DecapsulationFailed => "decapsulation_failed",
             Self::EncapsulationFailed => "encapsulation_failed",
