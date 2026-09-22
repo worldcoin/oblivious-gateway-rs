@@ -86,8 +86,8 @@ async fn start_gateway_tls(tls_config: &TlsConfig) -> SocketAddr {
 
     let key_ring =
         oblivious_gateway::keys::KeyRing::load(&[oblivious_gateway::config::GenerationConfig {
-            x25519_key_id: 0,
-            xwing_key_id: 1,
+            x25519: oblivious_gateway::config::KemSlot { key_id: Some(0) },
+            xwing: Some(oblivious_gateway::config::KemSlot { key_id: Some(1) }),
             advertise: true,
             seed: oblivious_gateway::config::SeedSource::Hex(
                 "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f".to_string(),

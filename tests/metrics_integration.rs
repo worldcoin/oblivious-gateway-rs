@@ -10,7 +10,7 @@ use axum::http::Request;
 use ohttp::ClientRequest;
 use tower::ServiceExt;
 
-use oblivious_gateway::config::{ForwardingConfig, GenerationConfig, SeedSource};
+use oblivious_gateway::config::{ForwardingConfig, GenerationConfig, KemSlot, SeedSource};
 use oblivious_gateway::forward::Forwarder;
 use oblivious_gateway::gateway::AppState;
 use oblivious_gateway::keys::KeyRing;
@@ -27,8 +27,8 @@ async fn gateway_request_updates_prometheus_counters() {
         .unwrap();
 
     let key_ring = KeyRing::load(&[GenerationConfig {
-        x25519_key_id: 0,
-        xwing_key_id: 1,
+        x25519: KemSlot { key_id: Some(0) },
+        xwing: Some(KemSlot { key_id: Some(1) }),
         advertise: true,
         seed: SeedSource::Hex(SEED_HEX.to_string()),
     }])

@@ -59,5 +59,27 @@ Not in RFC 9458:
   including internal addresses — deliberate, matching the Go reference,
   not an oversight. RFC 9458 §6.10 separately recommends exactly this kind
   of target allowlist, though it says nothing about redirects.
+- **A Key Generation's seed is required; there's no auto-generated
+  fallback.** The Go reference generates a random ephemeral seed at
+  startup if none is configured. We fail startup instead (`missing field
+  'seed'`) if a `[[generations]]` entry omits one. Go's fallback is a
+  footgun for any multi-replica deployment: each replica would derive a
+  *different* key from its own random seed, so the fleet's advertised
+  public key — and which replica can decrypt which client's traffic —
+  would depend on which process happened to serve a given request.
+- **Key IDs default rather than requiring both to be chosen.** The Go
+  reference only ever asks the operator for one number — `CONFIGURATION_ID`
+  (defaulting to `0`) — and derives its second, legacy key's ID from it
+  mechanically: `legacyConfigID := (configID - 128) % 255`
+  (`main.go:238`). It can get away with one formula because it only ever
+  produces exactly two fixed keys, with no rotation model at all. We
+  generalize the same shape per generation instead of hardcoding a single
+  pair: `x25519.key_id` defaults to `0` (same default as Go's
+  `CONFIGURATION_ID`), and `xwing.key_id` defaults to the X25519 ID + 128,
+  wrapping (same shape as Go's `-128` offset). Both remain overridable —
+  needed the moment there's more than one generation, since a second
+  generation defaulting to the same `0` would collide with the first's,
+  and startup validation catches that collision by the usual uniqueness
+  check rather than anything special-cased for the default.
 
 Source: <https://www.rfc-editor.org/rfc/rfc9458.html>

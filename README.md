@@ -46,15 +46,42 @@ response with the outer status held at 200, matching Go.
 See [`config/gateway.example.toml`](config/gateway.example.toml) for a
 fully commented example: `[server]` (listen address, paths, optional
 `[server.tls]` for HTTPS/mTLS), `[metrics]` (optional), `[forwarding]`
-(`allowed_targets`, optional `rewrites`), and one or more `[[generations]]`
-(`x25519_key_id`, `xwing_key_id`, `advertise`, and a `seed` from inline
-hex/env var/file, ≥32 bytes).
+(`allowed_targets`, optional `rewrites`), and one or more `[[generations]]`.
+
+Each `[[generations]]` entry is one operator-provided secret **seed**
+(inline hex, env var, or file — required, ≥32 bytes), plus optional
+`x25519`/`xwing` **key ID** overrides (`{ key_id = N }`, 0–255, unique
+across every generation). The seed determines the actual cryptographic
+keys: it derives one X25519 key and one X-Wing key (see `GLOSSARY.md` for
+the exact transform). The key IDs are unrelated to the seed and to each
+other beyond needing to be unique — they're RFC 9458 wire labels used to
+select which key a request was encrypted against, not derived from the
+seed itself.
+
+Both key IDs have sensible defaults so the common case needs neither set:
+`x25519` defaults to `0` (matching the Go reference's own default for its
+one operator-facing key ID), and `xwing` defaults to the X25519 ID + 128,
+wrapping (the same shape as Go's own primary/legacy key-ID pairing). A
+second generation can't rely on the same `x25519` default — it would
+collide with the first's — so startup validation forces later generations
+to set one explicitly, with an error naming exactly which ID collided.
+
+Every generation's seed is **required**; there is no auto-generated
+fallback if it's missing — startup fails fast instead (`missing field
+'seed'`, non-zero exit). This is a deliberate departure from the Go
+reference, which silently generates a random ephemeral seed when unset;
+that's a footgun in any multi-replica deployment, since each replica would
+then get a *different* key and the fleet's advertised public key (and
+which key decrypts which client's traffic) would depend on which replica
+handled the request.
 
 Loaded once at startup, no hot reload; invalid config fails fast with a
 structured log and non-zero exit. **Rotation runbook**: add a new
-generation (`advertise = true`), restart; once clients have adopted it,
-set the old one's `advertise = false`, restart (it still decrypts); once
-safe, delete it and restart. No automatic retirement.
+generation (`advertise = true`) with a *new*, independently generated
+seed — never derived from an existing generation's seed — restart; once
+clients have adopted it, set the old one's `advertise = false`, restart
+(it still decrypts); once safe, delete it and restart. No automatic
+retirement.
 
 ## Observability
 

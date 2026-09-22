@@ -55,34 +55,35 @@ impl Generation {
     /// Returns [`StartupError::Key`] if the seed can't be resolved, is
     /// shorter than [`MIN_SEED_LEN`], or either key fails to derive.
     fn from_config(cfg: &GenerationConfig) -> Result<Self, StartupError> {
+        let x25519_key_id = cfg.x25519_key_id();
+        let xwing_key_id = cfg.xwing_key_id();
+
         let seed = cfg
             .seed
             .resolve()
-            .map_err(|e| StartupError::Key(format!("generation {}: {e}", cfg.x25519_key_id)))?;
+            .map_err(|e| StartupError::Key(format!("generation {x25519_key_id}: {e}")))?;
         if seed.len() < MIN_SEED_LEN {
             return Err(StartupError::Key(format!(
-                "generation {} seed is {} bytes, need at least {MIN_SEED_LEN}",
-                cfg.x25519_key_id,
+                "generation {x25519_key_id} seed is {} bytes, need at least {MIN_SEED_LEN}",
                 seed.len()
             )));
         }
 
         let x25519_seed = x25519_seed_transform(&seed);
         let x25519_config = KeyConfig::derive(
-            cfg.x25519_key_id,
+            x25519_key_id,
             Kem::X25519Sha256,
             symmetric_suites(),
             &x25519_seed,
         )
         .map_err(|e| StartupError::Key(format!("deriving X25519 key: {e:?}")))?;
 
-        let xwing_config =
-            KeyConfig::derive(cfg.xwing_key_id, Kem::XWing, symmetric_suites(), &seed)
-                .map_err(|e| StartupError::Key(format!("deriving X-Wing key: {e:?}")))?;
+        let xwing_config = KeyConfig::derive(xwing_key_id, Kem::XWing, symmetric_suites(), &seed)
+            .map_err(|e| StartupError::Key(format!("deriving X-Wing key: {e:?}")))?;
 
         Ok(Self {
-            x25519_key_id: cfg.x25519_key_id,
-            xwing_key_id: cfg.xwing_key_id,
+            x25519_key_id,
+            xwing_key_id,
             advertise: cfg.advertise,
             x25519_config,
             xwing_config,

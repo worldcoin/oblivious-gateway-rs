@@ -41,26 +41,34 @@ allowed_targets = ["api.example.com", "internal.example.com:8443"]
 # self-contained block below: its own seed plus its own two key IDs. Each
 # generation derives one X25519 key and one X-Wing key from its own master
 # seed - different generations use different, independently generated
-# seeds, never a value derived from another generation's seed. Both key
-# IDs need to be distinct, stable identifiers (unique across every
-# generation, not just within this one). See GLOSSARY.md for why the
-# X25519 key uses a transformed copy of the seed.
+# seeds, never a value derived from another generation's seed. See
+# GLOSSARY.md for why the X25519 key uses a transformed copy of the seed.
 #
 # `seed` accepts inline hex (local testing only - see below), an
 # environment variable name, or a file path, e.g. `seed = { file = "/run/secrets/..." }`.
+#
+# `x25519`/`xwing` are both optional. Omit `x25519` (or its `key_id`) to
+# default to key ID 0 - matching the Go reference's own default for its
+# one operator-facing key ID (`CONFIGURATION_ID`, also defaulting to 0).
+# Omit `xwing` (or its `key_id`) to derive it from the X25519 key ID by
+# adding 128 (wrapping) - the same shape as Go's own legacy-configuration
+# derivation (`(configID - 128) % 255`), generalized to a per-generation
+# pair instead of one fixed pair. See GLOSSARY.md for both. A second
+# generation can't rely on the same default (it would collide with the
+# first's), so startup validation forces it to set an explicit ID - the
+# error tells you exactly which one collided.
 [[generations]]
-x25519_key_id = 0
-xwing_key_id = 1
 advertise = true
 # Seed material should come from an environment variable or a mounted file
 # in production; inline hex seeds are intended for local testing only.
 seed = { env = "OBLIVIOUS_GATEWAY_SEED" }
+# x25519 and xwing omitted here: this generation gets key IDs 0 and 128.
 
 # Example of a second, retained-but-not-advertised generation during
 # rotation - note its own independent seed (never derived from the first
-# generation's seed above) and its own distinct key IDs:
+# generation's seed above) and an explicit x25519 key ID, since omitting
+# it here would collide with the first generation's default of 0:
 # [[generations]]
-# x25519_key_id = 2
-# xwing_key_id = 3
+# x25519 = { key_id = 2 }
 # advertise = false
 # seed = { file = "/run/secrets/oblivious-gateway-seed-2" }

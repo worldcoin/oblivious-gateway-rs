@@ -125,14 +125,24 @@ pub struct RewriteTarget {
 
 /// One `[[generations]]` entry: a Key Generation (see `GLOSSARY.md`) —
 /// one X25519 key and one X-Wing key derived from a single master seed.
+///
+/// `deny_unknown_fields`: an older config using the flat `x25519_key_id`/
+/// `xwing_key_id` fields this schema replaced must fail loudly at parse
+/// time, not silently fall back to this schema's defaults for a generation
+/// whose IDs the operator actually meant to pin.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct GenerationConfig {
-    /// Key Identifier for this generation's X25519 key. Must be unique
-    /// across every generation's `x25519_key_id` and `xwing_key_id`.
-    pub x25519_key_id: u8,
-    /// Key Identifier for this generation's X-Wing key. Must be unique
-    /// across every generation's `x25519_key_id` and `xwing_key_id`.
-    pub xwing_key_id: u8,
+    /// X25519 Key Identifier settings for this generation. Omit entirely
+    /// (or omit its `key_id`) to default to `0` — see
+    /// [`GenerationConfig::x25519_key_id`].
+    #[serde(default)]
+    pub x25519: KemSlot,
+    /// X-Wing Key Identifier settings for this generation. Omit entirely
+    /// (or omit its `key_id`) to derive it from the X25519 Key Identifier
+    /// — see [`GenerationConfig::xwing_key_id`].
+    #[serde(default)]
+    pub xwing: Option<KemSlot>,
     /// Whether this generation's public Key Configurations appear in
     /// `/ohttp-keys`. Every loaded generation can still decrypt regardless
     /// of this flag; setting it to `false` supports decrypt-only rotation.
@@ -141,6 +151,52 @@ pub struct GenerationConfig {
     pub advertise: bool,
     /// Where this generation's master seed comes from.
     pub seed: SeedSource,
+}
+
+/// A `[generations.x25519]` or `[generations.xwing]` table (or its inline
+/// equivalent, `x25519 = { key_id = N }`).
+#[derive(Debug, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct KemSlot {
+    /// Explicit Key Identifier override. See
+    /// [`GenerationConfig::x25519_key_id`]/[`GenerationConfig::xwing_key_id`]
+    /// for what happens when this is omitted.
+    #[serde(default)]
+    pub key_id: Option<u8>,
+}
+
+impl GenerationConfig {
+    /// This generation's X25519 Key Identifier.
+    ///
+    /// Explicit `x25519.key_id` if set. Otherwise defaults to `0` — the
+    /// same default the Go reference uses for its one operator-facing key
+    /// ID (`CONFIGURATION_ID`, defaulting to `0`; see `GLOSSARY.md`). A
+    /// second generation can't also rely on this default (it would
+    /// collide with the first), so startup validation forces later
+    /// generations to set one explicitly.
+    #[must_use]
+    pub fn x25519_key_id(&self) -> u8 {
+        self.x25519.key_id.unwrap_or(0)
+    }
+
+    /// This generation's X-Wing Key Identifier.
+    ///
+    /// Explicit `xwing.key_id` if set. Otherwise derived from
+    /// [`Self::x25519_key_id`] by adding 128 (wrapping) — the same shape
+    /// as the Go reference's own legacy-configuration formula
+    /// (`(configID - 128) % 255`; see `GLOSSARY.md`), adapted to a
+    /// two-argument (not fixed-pair) key model. Collisions across
+    /// generations are still caught at startup, same as an explicit ID
+    /// would be.
+    #[must_use]
+    pub fn xwing_key_id(&self) -> u8 {
+        match &self.xwing {
+            Some(slot) => slot
+                .key_id
+                .unwrap_or_else(|| self.x25519_key_id().wrapping_add(128)),
+            None => self.x25519_key_id().wrapping_add(128),
+        }
+    }
 }
 
 /// Where a generation's master seed comes from. Ordinary settings live in
@@ -208,16 +264,18 @@ impl FileConfig {
 
         let mut seen_ids: HashSet<u8> = HashSet::new();
         for generation in &self.generations {
-            if generation.x25519_key_id == generation.xwing_key_id {
+            let (x25519_id, xwing_id) = (generation.x25519_key_id(), generation.xwing_key_id());
+            if x25519_id == xwing_id {
                 return Err(StartupError::Config(format!(
-                    "generation has identical x25519_key_id and xwing_key_id ({})",
-                    generation.x25519_key_id
+                    "generation has identical x25519 and xwing key IDs ({x25519_id}); set an \
+                     explicit key_id for at least one of them"
                 )));
             }
-            for id in [generation.x25519_key_id, generation.xwing_key_id] {
+            for id in [x25519_id, xwing_id] {
                 if !seen_ids.insert(id) {
                     return Err(StartupError::Config(format!(
-                        "duplicate key identifier {id} across generations"
+                        "duplicate key identifier {id} across generations; set an explicit \
+                         key_id to resolve the conflict"
                     )));
                 }
             }

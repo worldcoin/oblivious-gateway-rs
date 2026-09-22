@@ -2,13 +2,12 @@
 //! a client CA is configured. This extends the Go reference, which only
 //! offers `http.ListenAndServeTLS` with no client-certificate support.
 
-use std::sync::Arc;
-
 use axum_server::tls_rustls::RustlsConfig;
 use rustls::server::WebPkiClientVerifier;
 use rustls::RootCertStore;
 use rustls_pki_types::pem::PemObject;
 use rustls_pki_types::{CertificateDer, PrivateKeyDer};
+use std::sync::Arc;
 
 use crate::config::TlsConfig;
 use crate::error::StartupError;

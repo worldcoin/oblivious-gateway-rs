@@ -28,12 +28,12 @@ listen_addr = "{metrics_addr}"
 [forwarding]
 allowed_targets = ["example.invalid"]
 [[generations]]
-x25519_key_id = 0
-xwing_key_id = 1
+x25519 = {{ key_id = 0 }}
+xwing = {{ key_id = 1 }}
 seed = {{ hex = "{}" }}
 [[generations]]
-x25519_key_id = 2
-xwing_key_id = 3
+x25519 = {{ key_id = 2 }}
+xwing = {{ key_id = 3 }}
 advertise = false
 seed = {{ hex = "{}" }}
 "#,

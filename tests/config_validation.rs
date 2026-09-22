@@ -51,8 +51,8 @@ listen_addr = "127.0.0.1:0"
 allowed_targets = ["example.invalid"]
 
 [[generations]]
-x25519_key_id = 0
-xwing_key_id = 1
+x25519 = { key_id = 0 }
+xwing = { key_id = 1 }
 [generations.seed]
 hex = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
 "#;
@@ -92,8 +92,8 @@ listen_addr = "127.0.0.1:0"
 allowed_targets = ["example.invalid"]
 
 [[generations]]
-x25519_key_id = 5
-xwing_key_id = 5
+x25519 = { key_id = 5 }
+xwing = { key_id = 5 }
 [generations.seed]
 hex = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
 "#,
@@ -113,14 +113,14 @@ listen_addr = "127.0.0.1:0"
 allowed_targets = ["example.invalid"]
 
 [[generations]]
-x25519_key_id = 0
-xwing_key_id = 1
+x25519 = { key_id = 0 }
+xwing = { key_id = 1 }
 [generations.seed]
 hex = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
 
 [[generations]]
-x25519_key_id = 1
-xwing_key_id = 2
+x25519 = { key_id = 1 }
+xwing = { key_id = 2 }
 [generations.seed]
 hex = "202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f"
 "#,
@@ -142,8 +142,8 @@ keys_path = "/same"
 allowed_targets = ["example.invalid"]
 
 [[generations]]
-x25519_key_id = 0
-xwing_key_id = 1
+x25519 = { key_id = 0 }
+xwing = { key_id = 1 }
 [generations.seed]
 hex = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
 "#,
@@ -166,8 +166,8 @@ key_file = "/nonexistent/key.pem"
 allowed_targets = ["example.invalid"]
 
 [[generations]]
-x25519_key_id = 0
-xwing_key_id = 1
+x25519 = { key_id = 0 }
+xwing = { key_id = 1 }
 [generations.seed]
 hex = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
 "#,
@@ -189,8 +189,8 @@ listen_addr = "127.0.0.1:0"
 allowed_targets = ["example.invalid"]
 
 [[generations]]
-x25519_key_id = 0
-xwing_key_id = 1
+x25519 = { key_id = 0 }
+xwing = { key_id = 1 }
 [generations.seed]
 hex = "0001020304"
 "#,
@@ -198,4 +198,102 @@ hex = "0001020304"
     let config = FileConfig::load(&file.path).expect("TOML shape is valid");
     let err = KeyRing::load(&config.generations).err().unwrap();
     assert!(format!("{err}").contains("need at least"));
+}
+
+#[test]
+fn rejects_the_old_flat_key_id_fields() {
+    // x25519_key_id/xwing_key_id (pre-KemSlot schema) must fail loudly at
+    // parse time, not be silently ignored in favor of this schema's
+    // defaults for a generation whose IDs the operator meant to pin.
+    let file = write_temp(
+        r#"
+[server]
+listen_addr = "127.0.0.1:0"
+
+[forwarding]
+allowed_targets = ["example.invalid"]
+
+[[generations]]
+x25519_key_id = 0
+xwing_key_id = 1
+[generations.seed]
+hex = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+"#,
+    );
+    let err = FileConfig::load(&file.path).unwrap_err();
+    assert!(format!("{err}").contains("unknown field `x25519_key_id`"));
+}
+
+#[test]
+fn key_ids_default_when_omitted_and_can_be_overridden() {
+    // Omitting both x25519 and xwing entirely: x25519 defaults to 0
+    // (matching the Go reference's own CONFIGURATION_ID default), xwing
+    // defaults to x25519's ID + 128 (matching the shape, not the exact
+    // formula, of Go's legacy-configuration derivation) - see GLOSSARY.md.
+    let defaulted = write_temp(
+        r#"
+[server]
+listen_addr = "127.0.0.1:0"
+[forwarding]
+allowed_targets = ["example.invalid"]
+[[generations]]
+seed = { hex = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f" }
+"#,
+    );
+    let config = FileConfig::load(&defaulted.path).unwrap();
+    assert_eq!(config.generations[0].x25519_key_id(), 0);
+    assert_eq!(config.generations[0].xwing_key_id(), 128);
+
+    // x25519 explicit, xwing omitted: xwing still derives from x25519.
+    let derived = write_temp(
+        r#"
+[server]
+listen_addr = "127.0.0.1:0"
+[forwarding]
+allowed_targets = ["example.invalid"]
+[[generations]]
+x25519 = { key_id = 5 }
+seed = { hex = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f" }
+"#,
+    );
+    let config = FileConfig::load(&derived.path).unwrap();
+    assert_eq!(config.generations[0].x25519_key_id(), 5);
+    assert_eq!(config.generations[0].xwing_key_id(), 133);
+
+    // Both explicit: no defaulting/derivation kicks in at all.
+    let explicit = write_temp(
+        r#"
+[server]
+listen_addr = "127.0.0.1:0"
+[forwarding]
+allowed_targets = ["example.invalid"]
+[[generations]]
+x25519 = { key_id = 5 }
+xwing = { key_id = 200 }
+seed = { hex = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f" }
+"#,
+    );
+    let config = FileConfig::load(&explicit.path).unwrap();
+    assert_eq!(config.generations[0].x25519_key_id(), 5);
+    assert_eq!(config.generations[0].xwing_key_id(), 200);
+}
+
+#[test]
+fn second_generation_must_override_the_default_x25519_id() {
+    // Two generations both omitting x25519 would both default to 0 and
+    // collide - this must fail loudly, not silently pick one.
+    let file = write_temp(
+        r#"
+[server]
+listen_addr = "127.0.0.1:0"
+[forwarding]
+allowed_targets = ["example.invalid"]
+[[generations]]
+seed = { hex = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f" }
+[[generations]]
+seed = { hex = "202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f" }
+"#,
+    );
+    let err = FileConfig::load(&file.path).unwrap_err();
+    assert!(format!("{err}").contains("duplicate key identifier 0"));
 }
