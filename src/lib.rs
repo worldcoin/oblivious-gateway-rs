@@ -18,7 +18,7 @@
 //! - [`bhttp`]: translation between the wire format and ordinary HTTP.
 //! - [`forward`]: outbound allowlisting, rewrites, and the HTTP client
 //!   used to reach the Target Resource.
-//! - [`tls`]: incoming HTTPS/mTLS configuration.
+//! - [`tls`]: incoming HTTPS configuration.
 //! - [`metrics`]: Prometheus metrics via the `metrics` facade.
 //! - [`error`]: the outer/payload error split described in `GLOSSARY.md`.
 #![warn(missing_docs)]

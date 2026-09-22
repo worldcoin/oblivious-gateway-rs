@@ -65,13 +65,13 @@ pub struct ServerConfig {
     /// before forcing the process to exit. Defaults to 30 seconds.
     #[serde(default = "default_shutdown_grace_seconds")]
     pub shutdown_grace_seconds: u64,
-    /// Optional incoming TLS/mTLS configuration. Omit to serve plaintext
-    /// HTTP, e.g. when TLS terminates at an upstream load balancer.
+    /// Optional incoming TLS configuration. Omit to serve plaintext HTTP,
+    /// e.g. when TLS terminates at an upstream load balancer.
     #[serde(default)]
     pub tls: Option<TlsConfig>,
 }
 
-/// `[server.tls]`: incoming HTTPS, with optional mTLS.
+/// `[server.tls]`: incoming HTTPS.
 #[derive(Debug, Deserialize)]
 pub struct TlsConfig {
     /// Path to the PEM-encoded server certificate (chain).
