@@ -95,11 +95,10 @@ Docker build-and-health-check, all on our self-hosted runners.
 `validate-pr.yml` enforces conventional-commit PR titles.
 
 This repo is private and does not publish to GHCR or any public
-registry. `ecr-release.yaml` publishes to our own private ECR on a
-published GitHub Release tagged `vX.Y.Z`, via the shared
-`worldcoin/gh-actions/ecr-build-and-push` action (same pattern as
-`world-chain-rundler`). **The target ECR repository does not exist
-yet** — create it before cutting the first release.
+registry. `ecr-release.yaml` publishes to our own private ECR
+(`oblivious-gateway-rs`, `eu-central-1`) on a published GitHub Release
+tagged `vX.Y.Z`, via the shared `worldcoin/gh-actions/ecr-build-and-push`
+action (same pattern as `world-chain-rundler`).
 
 ## Known limitations
 
