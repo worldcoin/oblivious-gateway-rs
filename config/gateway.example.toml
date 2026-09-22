@@ -37,24 +37,30 @@ allowed_targets = ["api.example.com", "internal.example.com:8443"]
 [forwarding.rewrites]
 "internal.example.com:8443" = { scheme = "https", host = "internal-service.svc.cluster.local:443" }
 
-# At least one key generation is required. Each generation derives one
-# X25519 key and one X-Wing key from a single master seed; both keys need
-# distinct, stable identifiers. See GLOSSARY.md for why the X25519 key
-# uses a transformed copy of the seed.
+# At least one key generation is required. Each generation is one
+# self-contained block below: its own seed plus its own two key IDs. Each
+# generation derives one X25519 key and one X-Wing key from its own master
+# seed - different generations use different, independently generated
+# seeds, never a value derived from another generation's seed. Both key
+# IDs need to be distinct, stable identifiers (unique across every
+# generation, not just within this one). See GLOSSARY.md for why the
+# X25519 key uses a transformed copy of the seed.
+#
+# `seed` accepts inline hex (local testing only - see below), an
+# environment variable name, or a file path, e.g. `seed = { file = "/run/secrets/..." }`.
 [[generations]]
 x25519_key_id = 0
 xwing_key_id = 1
 advertise = true
-
 # Seed material should come from an environment variable or a mounted file
 # in production; inline hex seeds are intended for local testing only.
-[generations.seed]
-env = "OBLIVIOUS_GATEWAY_SEED"
+seed = { env = "OBLIVIOUS_GATEWAY_SEED" }
 
-# Example of a retained-but-not-advertised generation during rotation:
+# Example of a second, retained-but-not-advertised generation during
+# rotation - note its own independent seed (never derived from the first
+# generation's seed above) and its own distinct key IDs:
 # [[generations]]
 # x25519_key_id = 2
 # xwing_key_id = 3
 # advertise = false
-# [generations.seed]
-# file = "/run/secrets/oblivious-gateway-seed-2"
+# seed = { file = "/run/secrets/oblivious-gateway-seed-2" }
