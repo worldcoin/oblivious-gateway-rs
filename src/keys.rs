@@ -8,7 +8,6 @@
 //! and key identifier (see GLOSSARY.md). Both KEMs use HKDF-SHA256 +
 //! AES-128-GCM.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use ohttp::hpke::{Aead, Kdf, Kem};
@@ -91,15 +90,23 @@ impl Generation {
     }
 }
 
+/// One loaded key: its identifier, KEM label, decryption server, and
+/// whether it's currently advertised. The single source of truth backing
+/// `KeyRing` — every other view (`server_for`, `kem_label`, the advertised
+/// counts) is derived from a list of these rather than tracked separately.
+struct LoadedKey {
+    key_id: KeyId,
+    kem: &'static str,
+    advertise: bool,
+    server: Arc<Server>,
+}
+
 /// The full set of decryption servers plus the currently advertised public
 /// configuration list. Every loaded generation can decrypt; only advertised
 /// generations are published, supporting decrypt-only rotation.
 pub struct KeyRing {
-    servers: HashMap<KeyId, Arc<Server>>,
+    keys: Vec<LoadedKey>,
     advertised_configs: Vec<u8>,
-    kem_by_key_id: HashMap<KeyId, &'static str>,
-    advertised_x25519_count: usize,
-    advertised_xwing_count: usize,
 }
 
 impl KeyRing {
@@ -111,32 +118,34 @@ impl KeyRing {
     /// derivation fails, or if encoding the advertised configuration list
     /// fails.
     pub fn load(generations: &[GenerationConfig]) -> Result<Self, StartupError> {
-        let mut servers = HashMap::new();
-        let mut kem_by_key_id = HashMap::new();
+        let mut keys = Vec::new();
         // Publish in configuration order, X25519 then X-Wing per generation,
         // so operators control preference by ordering generations with
-        // newer ones last.
+        // newer ones last. `keys`' order doubles as this list's order, so
+        // no separate ordered structure is needed to encode it below.
         let mut advertise_list: Vec<KeyConfig> = Vec::new();
 
         for gen_cfg in generations {
             let generation = Generation::from_config(gen_cfg)?;
 
-            servers.insert(
-                generation.x25519_key_id,
-                Arc::new(
+            keys.push(LoadedKey {
+                key_id: generation.x25519_key_id,
+                kem: "x25519",
+                advertise: generation.advertise,
+                server: Arc::new(
                     Server::new(generation.x25519_config.clone())
                         .map_err(|e| StartupError::Key(format!("X25519 server: {e:?}")))?,
                 ),
-            );
-            servers.insert(
-                generation.xwing_key_id,
-                Arc::new(
+            });
+            keys.push(LoadedKey {
+                key_id: generation.xwing_key_id,
+                kem: "xwing",
+                advertise: generation.advertise,
+                server: Arc::new(
                     Server::new(generation.xwing_config.clone())
                         .map_err(|e| StartupError::Key(format!("X-Wing server: {e:?}")))?,
                 ),
-            );
-            kem_by_key_id.insert(generation.x25519_key_id, "x25519");
-            kem_by_key_id.insert(generation.xwing_key_id, "xwing");
+            });
 
             if generation.advertise {
                 advertise_list.push(generation.x25519_config);
@@ -144,31 +153,31 @@ impl KeyRing {
             }
         }
 
-        let advertised_x25519_count = advertise_list.len() / 2;
-        let advertised_xwing_count = advertise_list.len() / 2;
-
         let advertised_configs = KeyConfig::encode_list(&advertise_list)
             .map_err(|e| StartupError::Key(format!("encoding advertised configs: {e:?}")))?;
 
         Ok(Self {
-            servers,
+            keys,
             advertised_configs,
-            kem_by_key_id,
-            advertised_x25519_count,
-            advertised_xwing_count,
         })
     }
 
     /// Number of X25519 Key Configurations currently advertised.
     #[must_use]
     pub fn advertised_x25519_count(&self) -> usize {
-        self.advertised_x25519_count
+        self.keys
+            .iter()
+            .filter(|k| k.advertise && k.kem == "x25519")
+            .count()
     }
 
     /// Number of X-Wing Key Configurations currently advertised.
     #[must_use]
     pub fn advertised_xwing_count(&self) -> usize {
-        self.advertised_xwing_count
+        self.keys
+            .iter()
+            .filter(|k| k.advertise && k.kem == "xwing")
+            .count()
     }
 
     /// Look up the decryption server for a request's key identifier. The
@@ -177,16 +186,19 @@ impl KeyRing {
     /// carried in the request header.
     #[must_use]
     pub fn server_for(&self, key_id: KeyId) -> Option<Arc<Server>> {
-        self.servers.get(&key_id).cloned()
+        self.keys
+            .iter()
+            .find(|k| k.key_id == key_id)
+            .map(|k| k.server.clone())
     }
 
     /// `"x25519"`, `"xwing"`, or `"unknown"` — a bounded label for metrics.
     #[must_use]
     pub fn kem_label(&self, key_id: KeyId) -> &'static str {
-        self.kem_by_key_id
-            .get(&key_id)
-            .copied()
-            .unwrap_or("unknown")
+        self.keys
+            .iter()
+            .find(|k| k.key_id == key_id)
+            .map_or("unknown", |k| k.kem)
     }
 
     /// RFC 9458 `application/ohttp-keys` wire format for every advertised
@@ -200,7 +212,7 @@ impl KeyRing {
     /// regardless of whether they're advertised.
     #[must_use]
     pub fn loaded_key_count(&self) -> usize {
-        self.servers.len()
+        self.keys.len()
     }
 }
 
