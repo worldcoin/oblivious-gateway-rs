@@ -122,11 +122,8 @@ pub struct RewriteTarget {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GenerationConfig {
-    /// X25519 Key Identifier settings for this generation. Omit entirely
-    /// (or omit its `key_id`) to default to `0` — see
-    /// [`GenerationConfig::x25519_key_id`].
-    #[serde(default)]
-    pub x25519: KemSlot,
+    /// Required, stable X25519 Key Identifier for this generation.
+    pub x25519: RequiredKemSlot,
     /// X-Wing Key Identifier settings for this generation. Omit entirely
     /// (or omit its `key_id`) to derive it from the X25519 Key Identifier
     /// — see [`GenerationConfig::xwing_key_id`].
@@ -142,8 +139,15 @@ pub struct GenerationConfig {
     pub seed: SeedSource,
 }
 
-/// A `[generations.x25519]` or `[generations.xwing]` table (or its inline
-/// equivalent, `x25519 = { key_id = N }`).
+/// Explicit key identity, independent of generation ordering.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RequiredKemSlot {
+    /// Must be unique across all loaded keys, including decrypt-only keys.
+    pub key_id: u8,
+}
+
+/// Optional X-Wing key identifier override.
 #[derive(Debug, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct KemSlot {
@@ -157,15 +161,10 @@ pub struct KemSlot {
 impl GenerationConfig {
     /// This generation's X25519 Key Identifier.
     ///
-    /// Explicit `x25519.key_id` if set. Otherwise defaults to `0` — the
-    /// same default the Go reference uses for its one operator-facing key
-    /// ID (`CONFIGURATION_ID`, defaulting to `0`; see `GLOSSARY.md`). A
-    /// second generation can't also rely on this default (it would
-    /// collide with the first), so startup validation forces later
-    /// generations to set one explicitly.
+    /// Remains unchanged when other generations are removed or reordered.
     #[must_use]
     pub fn x25519_key_id(&self) -> u8 {
-        self.x25519.key_id.unwrap_or(0)
+        self.x25519.key_id
     }
 
     /// This generation's X-Wing Key Identifier.

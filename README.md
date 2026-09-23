@@ -58,12 +58,11 @@ other beyond needing to be unique — they're RFC 9458 wire labels used to
 select which key a request was encrypted against, not derived from the
 seed itself.
 
-Both key IDs have sensible defaults so the common case needs neither set:
-`x25519` defaults to `0`, and `xwing` defaults to the X25519 ID + 128,
-wrapping (the same shape as Go's own primary/legacy key-ID pairing). A
-second generation can't rely on the same `x25519` default — it would
-collide with the first's — so startup validation forces later generations
-to set one explicitly, with an error naming exactly which ID collided.
+Every generation requires an explicit `x25519.key_id`, including the first.
+`xwing.key_id` defaults to the X25519 ID + 128, wrapping, and can be
+overridden. IDs remain stable when generations are reordered or removed;
+duplicate IDs are rejected at startup. `advertise` defaults to `true`;
+set it to `false` to retain a generation for decryption only.
 
 Every generation's seed is **required**; there is no auto-generated
 fallback if it's missing — startup fails fast instead (`missing field

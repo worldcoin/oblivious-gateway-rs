@@ -201,10 +201,7 @@ hex = "0001020304"
 }
 
 #[test]
-fn key_ids_default_when_omitted_and_can_be_overridden() {
-    // Omitting both x25519 and xwing entirely: x25519 defaults to 0
-    // xwing defaults to x25519's ID + 128 (matching the shape, not the exact
-    // formula, of Go's legacy-configuration derivation) - see GLOSSARY.md.
+fn xwing_key_id_defaults_and_can_be_overridden() {
     let defaulted = write_temp(
         r#"
 [server]
@@ -212,12 +209,14 @@ listen_addr = "127.0.0.1:0"
 [forwarding]
 allowed_targets = ["example.invalid"]
 [[generations]]
+x25519 = { key_id = 0 }
 seed = { hex = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f" }
 "#,
     );
     let config = FileConfig::load(&defaulted.path).unwrap();
     assert_eq!(config.generations[0].x25519_key_id(), 0);
     assert_eq!(config.generations[0].xwing_key_id(), 128);
+    assert!(config.generations[0].advertise);
 
     // x25519 explicit, xwing omitted: xwing still derives from x25519.
     let derived = write_temp(
@@ -254,21 +253,17 @@ seed = { hex = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f
 }
 
 #[test]
-fn second_generation_must_override_the_default_x25519_id() {
-    // Two generations both omitting x25519 would both default to 0 and
-    // collide - this must fail loudly, not silently pick one.
-    let file = write_temp(
-        r#"
-[server]
-listen_addr = "127.0.0.1:0"
-[forwarding]
-allowed_targets = ["example.invalid"]
-[[generations]]
-seed = { hex = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f" }
-[[generations]]
-seed = { hex = "202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f" }
-"#,
-    );
-    let err = FileConfig::load(&file.path).unwrap_err();
-    assert!(format!("{err}").contains("duplicate key identifier 0"));
+fn every_generation_requires_an_x25519_key_id() {
+    for (setting, missing) in [("", "x25519"), ("x25519 = {}", "key_id")] {
+        let invalid = VALID_BASE.replace("x25519 = { key_id = 0 }", setting);
+        let generation = invalid.split_once("[[generations]]").unwrap().1;
+        for contents in [
+            invalid.clone(),
+            format!("{VALID_BASE}\n[[generations]]{generation}"),
+        ] {
+            let file = write_temp(&contents);
+            let err = FileConfig::load(&file.path).unwrap_err();
+            assert!(format!("{err}").contains(&format!("missing field `{missing}`")));
+        }
+    }
 }

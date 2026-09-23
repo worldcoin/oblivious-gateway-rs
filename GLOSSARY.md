@@ -66,19 +66,17 @@ Not in RFC 9458:
   *different* key from its own random seed, so the fleet's advertised
   public key — and which replica can decrypt which client's traffic —
   would depend on which process happened to serve a given request.
-- **Key IDs default rather than requiring both to be chosen.** The Go
+- **Only the X-Wing key ID defaults.** The Go
   reference only ever asks the operator for one number — `CONFIGURATION_ID`
   (defaulting to `0`) — and derives its second, legacy key's ID from it
   mechanically: `legacyConfigID := (configID - 128) % 255`
   (`main.go:238`). It can get away with one formula because it only ever
   produces exactly two fixed keys, with no rotation model at all. We
   generalize the same shape per generation instead of hardcoding a single
-  pair: `x25519.key_id` defaults to `0` (same default as Go's
-  `CONFIGURATION_ID`), and `xwing.key_id` defaults to the X25519 ID + 128,
-  wrapping (same shape as Go's `-128` offset). Both remain overridable —
-  needed the moment there's more than one generation, since a second
-  generation defaulting to the same `0` would collide with the first's,
-  and startup validation catches that collision by the usual uniqueness
-  check rather than anything special-cased for the default.
+  pair: every generation requires an explicit `x25519.key_id`, while
+  `xwing.key_id` defaults to the X25519 ID + 128, wrapping, with an optional
+  override. IDs do not depend on list order, so removing or reordering
+  generations does not change their identities. Startup validation rejects
+  duplicate IDs across all loaded keys.
 
 Source: <https://www.rfc-editor.org/rfc/rfc9458.html>

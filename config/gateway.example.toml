@@ -44,26 +44,23 @@ allowed_targets = ["api.example.com", "internal.example.com:8443"]
 # `seed` accepts inline hex (local testing only - see below), an
 # environment variable name, or a file path, e.g. `seed = { file = "/run/secrets/..." }`.
 #
-# `x25519`/`xwing` are both optional. Omit `x25519` (or its `key_id`) to
-# default to key ID 0.
+# Every generation requires an explicit `x25519.key_id`, including the first.
 # Omit `xwing` (or its `key_id`) to derive it from the X25519 key ID by
 # adding 128 (wrapping) - the same shape as Go's own legacy-configuration
 # derivation (`(configID - 128) % 255`), generalized to a per-generation
-# pair instead of one fixed pair. See GLOSSARY.md for both. A second
-# generation can't rely on the same default (it would collide with the
-# first's), so startup validation forces it to set an explicit ID - the
-# error tells you exactly which one collided.
+# pair instead of one fixed pair. IDs must be unique across all loaded keys.
+# Keep IDs stable when reordering or removing generations.
+# `advertise` defaults to true; set false only for decrypt-only generations.
 [[generations]]
-advertise = true
+x25519 = { key_id = 0 }
 # Seed material should come from an environment variable or a mounted file
 # in production; inline hex seeds are intended for local testing only.
 seed = { env = "OBLIVIOUS_GATEWAY_SEED" }
-# x25519 and xwing omitted here: this generation gets key IDs 0 and 128.
+# xwing omitted here: this generation gets key IDs 0 and 128.
 
 # Example of a second, retained-but-not-advertised generation during
 # rotation - note its own independent seed (never derived from the first
-# generation's seed above) and an explicit x25519 key ID, since omitting
-# it here would collide with the first generation's default of 0:
+# generation's seed above) and its own stable x25519 key ID:
 # [[generations]]
 # x25519 = { key_id = 2 }
 # advertise = false

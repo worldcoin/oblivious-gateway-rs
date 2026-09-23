@@ -12,7 +12,9 @@ use ohttp::ClientRequest;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tower::ServiceExt;
 
-use oblivious_gateway::config::{ForwardingConfig, GenerationConfig, KemSlot, SeedSource};
+use oblivious_gateway::config::{
+    ForwardingConfig, GenerationConfig, KemSlot, RequiredKemSlot, SeedSource,
+};
 use oblivious_gateway::forward::Forwarder;
 use oblivious_gateway::gateway::AppState;
 use oblivious_gateway::keys::KeyRing;
@@ -21,7 +23,7 @@ const SEED_HEX: &str = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b
 
 fn test_generations() -> Vec<GenerationConfig> {
     vec![GenerationConfig {
-        x25519: KemSlot { key_id: Some(0) },
+        x25519: RequiredKemSlot { key_id: 0 },
         xwing: KemSlot { key_id: Some(1) },
         advertise: true,
         seed: SeedSource::Hex(SEED_HEX.to_string()),
@@ -626,13 +628,13 @@ async fn decrypt_only_generation_still_decrypts_but_is_not_advertised() {
 
     let generations = vec![
         GenerationConfig {
-            x25519: KemSlot { key_id: Some(0) },
+            x25519: RequiredKemSlot { key_id: 0 },
             xwing: KemSlot { key_id: Some(1) },
             advertise: true,
             seed: SeedSource::Hex(SEED_HEX.to_string()),
         },
         GenerationConfig {
-            x25519: KemSlot { key_id: Some(2) },
+            x25519: RequiredKemSlot { key_id: 2 },
             xwing: KemSlot { key_id: Some(3) },
             advertise: false,
             seed: SeedSource::Hex(
