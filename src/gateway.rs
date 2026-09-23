@@ -5,7 +5,7 @@ use std::time::Instant;
 
 use axum::body::to_bytes;
 use axum::extract::{Request, State};
-use axum::http::{header, StatusCode};
+use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 
 use crate::bhttp;

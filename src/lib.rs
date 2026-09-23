@@ -34,8 +34,8 @@ pub mod tls;
 
 use std::sync::Arc;
 
-use axum::routing::{any, post};
 use axum::Router;
+use axum::routing::{any, post};
 
 use crate::config::ServerConfig;
 use crate::gateway::AppState;

@@ -7,8 +7,8 @@
 use std::io::Cursor;
 
 use bhttp::{Message, Mode, StatusCode};
-use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use reqwest::Method;
+use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 
 use crate::error::PayloadError;
 

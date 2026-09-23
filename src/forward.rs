@@ -92,10 +92,10 @@ impl Forwarder {
     }
 
     async fn send(&self, request: &BinaryHttpRequest) -> Result<reqwest::Response, PayloadError> {
-        if let Some(allowed) = &self.allowed_targets {
-            if !allowed.contains(&request.authority) {
-                return Err(PayloadError::Forbidden);
-            }
+        if let Some(allowed) = &self.allowed_targets
+            && !allowed.contains(&request.authority)
+        {
+            return Err(PayloadError::Forbidden);
         }
 
         let (scheme, host) = match self.rewrites.get(&request.authority) {

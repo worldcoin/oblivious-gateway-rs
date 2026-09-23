@@ -8,9 +8,9 @@
 use std::net::SocketAddr;
 use std::time::Instant;
 
+use axum::Router;
 use axum::extract::State;
 use axum::routing::get;
-use axum::Router;
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 
 use crate::error::StartupError;

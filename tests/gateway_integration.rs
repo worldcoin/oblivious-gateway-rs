@@ -34,8 +34,8 @@ fn test_generations() -> Vec<GenerationConfig> {
 /// as the response body and sets a hop-by-hop `Connection` header that the
 /// gateway must strip.
 async fn spawn_target() -> SocketAddr {
-    use axum::routing::any;
     use axum::Router;
+    use axum::routing::any;
 
     async fn echo(req: Request<Body>) -> axum::response::Response {
         use axum::body::to_bytes;
@@ -424,9 +424,9 @@ async fn unknown_route_is_404() {
 /// ADR 0002: the allowlist is checked only on the initial destination, and
 /// the redirect is followed without re-validating it.
 async fn spawn_redirecting_target(landing_authority: String) -> SocketAddr {
+    use axum::Router;
     use axum::extract::State;
     use axum::routing::any;
-    use axum::Router;
 
     async fn redirect(State(landing): State<String>) -> axum::response::Response {
         use axum::http::header;
