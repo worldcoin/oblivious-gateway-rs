@@ -3,7 +3,7 @@
 # Build stage: aws-lc-rs (via rustls) needs cmake and a C/C++ toolchain to
 # build its bundled BoringSSL; the base Rust image on Debian bookworm keeps
 # glibc compatible with the distroless runtime image below.
-FROM rust:1-slim-bookworm AS builder
+FROM rust:1.98.1-slim-bookworm@sha256:ff521445a372125ed4f76e1453a1f8098f2d05332d1601d30db1c1f62757e730 AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
   build-essential \
@@ -16,10 +16,9 @@ WORKDIR /build
 COPY Cargo.toml Cargo.lock ./
 COPY src ./src
 
-RUN cargo build --release --locked && \
-  strip target/release/oblivious-gateway
+RUN cargo build --release --locked
 
-FROM gcr.io/distroless/cc-debian12:nonroot
+FROM gcr.io/distroless/cc-debian12:nonroot@sha256:9dac0a79194e45a7da0158a9c6da57b217585af0786db3845d1f0ec1a0dd182f
 
 COPY --from=builder /build/target/release/oblivious-gateway /usr/local/bin/oblivious-gateway
 
