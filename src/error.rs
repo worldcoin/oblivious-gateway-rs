@@ -40,7 +40,7 @@ pub enum OuterError {
     #[error("failed to decapsulate the Encapsulated Request")]
     DecapsulationFailed,
     /// Encapsulating the response as an Encapsulated Response failed.
-    #[error("failed to encapsulate the Encapsulated Response")]
+    #[error("failed to encapsulate response")]
     EncapsulationFailed,
 }
 
