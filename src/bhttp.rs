@@ -4,6 +4,7 @@
 //!
 //! Known-length framing is used on both directions using RFC 9292's known-length message format.
 
+use std::collections::HashSet;
 use std::io::Cursor;
 
 use bhttp::{Message, Mode, StatusCode};
@@ -29,6 +30,18 @@ fn is_hop_by_hop(name: &[u8]) -> bool {
     HOP_BY_HOP
         .iter()
         .any(|h| h.as_bytes().eq_ignore_ascii_case(name))
+}
+
+fn connection_nominated_headers<'a>(values: impl Iterator<Item = &'a [u8]>) -> HashSet<Vec<u8>> {
+    values
+        .flat_map(|value| value.split(|byte| *byte == b','))
+        .map(|value| value.trim_ascii().to_ascii_lowercase())
+        .filter(|value| !value.is_empty())
+        .collect()
+}
+
+fn is_connection_nominated(name: &[u8], nominated: &HashSet<Vec<u8>>) -> bool {
+    nominated.contains(&name.to_ascii_lowercase())
 }
 
 /// The binary HTTP request message (RFC 9458 §4.1) that an Encapsulated
@@ -81,6 +94,14 @@ pub fn decode_request(bytes: &[u8]) -> Result<BinaryHttpRequest, PayloadError> {
         .map(|p| String::from_utf8_lossy(p).into_owned())
         .unwrap_or_else(|| "/".to_string());
 
+    let connection_nominated = connection_nominated_headers(
+        message
+            .header()
+            .iter()
+            .filter(|field| field.name().eq_ignore_ascii_case(b"connection"))
+            .map(|field| field.value()),
+    );
+
     let mut headers = HeaderMap::new();
     let mut host_header_values: Vec<HeaderValue> = Vec::new();
     for field in message.header().iter() {
@@ -94,7 +115,9 @@ pub fn decode_request(bytes: &[u8]) -> Result<BinaryHttpRequest, PayloadError> {
         {
             return Err(PayloadError::UnsupportedExpectation);
         }
-        if is_hop_by_hop(field.name()) {
+        if is_hop_by_hop(field.name())
+            || is_connection_nominated(field.name(), &connection_nominated)
+        {
             continue;
         }
         let name = HeaderName::from_bytes(field.name()).map_err(|_| PayloadError::Malformed)?;
@@ -155,8 +178,16 @@ pub fn encode_response(status: u16, headers: &HeaderMap, body: &[u8]) -> Vec<u8>
         StatusCode::try_from(500u16).expect("500 is a valid BHTTP status code")
     });
     let mut message = Message::response(status_code);
+    let connection_nominated = connection_nominated_headers(
+        headers
+            .get_all(reqwest::header::CONNECTION)
+            .iter()
+            .map(reqwest::header::HeaderValue::as_bytes),
+    );
     for (name, value) in headers.iter() {
-        if is_hop_by_hop(name.as_str().as_bytes()) {
+        if is_hop_by_hop(name.as_str().as_bytes())
+            || is_connection_nominated(name.as_str().as_bytes(), &connection_nominated)
+        {
             continue;
         }
         message.put_header(name.as_str().as_bytes().to_vec(), value.as_bytes().to_vec());
@@ -181,4 +212,53 @@ pub fn encode_error_response(status: u16, message: &str) -> Vec<u8> {
         HeaderValue::from_static("text/plain; charset=utf-8"),
     );
     encode_response(status, &headers, message.as_bytes())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{decode_request, encode_response};
+    use bhttp::{Message, Mode};
+    use reqwest::header::{HeaderMap, HeaderValue};
+
+    #[test]
+    fn connection_nominated_headers_do_not_cross_the_gateway_boundary() {
+        let mut request = Message::request(
+            b"GET".to_vec(),
+            b"https".to_vec(),
+            b"allowed.example".to_vec(),
+            b"/".to_vec(),
+        );
+        request.put_header(b"connection".to_vec(), b"x-hop".to_vec());
+        request.put_header(b"x-hop".to_vec(), b"private".to_vec());
+        request.put_header(b"x-keep".to_vec(), b"public".to_vec());
+        let mut encoded = Vec::new();
+        request
+            .write_bhttp(Mode::KnownLength, &mut encoded)
+            .unwrap();
+
+        let decoded = decode_request(&encoded).unwrap();
+        assert!(!decoded.headers.contains_key("x-hop"));
+        assert_eq!(decoded.headers["x-keep"], "public");
+
+        let mut headers = HeaderMap::new();
+        headers.insert("connection", HeaderValue::from_static("x-hop"));
+        headers.insert("x-hop", HeaderValue::from_static("private"));
+        headers.insert("x-keep", HeaderValue::from_static("public"));
+        let encoded = encode_response(200, &headers, b"");
+        let response = Message::read_bhttp(&mut std::io::Cursor::new(encoded)).unwrap();
+        assert_eq!(response.control().status().unwrap().code(), 200);
+        assert!(
+            response
+                .header()
+                .iter()
+                .all(|field| !field.name().eq_ignore_ascii_case(b"connection")
+                    && !field.name().eq_ignore_ascii_case(b"x-hop"))
+        );
+        assert!(
+            response
+                .header()
+                .iter()
+                .any(|field| field.name().eq_ignore_ascii_case(b"x-keep"))
+        );
+    }
 }

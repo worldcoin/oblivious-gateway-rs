@@ -26,6 +26,7 @@ use crate::error::PayloadError;
 /// default changes.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+const MAX_TARGET_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
 
 fn target_url(scheme: &str, authority: &str, path: &str) -> Result<Url, PayloadError> {
     if !scheme.eq_ignore_ascii_case("http") && !scheme.eq_ignore_ascii_case("https") {
@@ -145,10 +146,19 @@ impl Forwarder {
         &self,
         request: &BinaryHttpRequest,
     ) -> Result<(u16, reqwest::header::HeaderMap, Vec<u8>), PayloadError> {
-        let response = self.send(request).await?;
+        let mut response = self.send(request).await?;
         let status = response.status().as_u16();
         let headers = response.headers().clone();
-        let body = response.bytes().await.map_err(|err| {
+        if response
+            .content_length()
+            .is_some_and(|length| length > MAX_TARGET_RESPONSE_BYTES as u64)
+        {
+            tracing::warn!("target response body exceeds limit");
+            return Err(PayloadError::TargetFailed);
+        }
+
+        let mut body = Vec::new();
+        while let Some(chunk) = response.chunk().await.map_err(|err| {
             tracing::warn!(
                 timed_out = err.is_timeout(),
                 is_body = err.is_body(),
@@ -156,14 +166,23 @@ impl Forwarder {
                 "reading target response body failed"
             );
             PayloadError::TargetFailed
-        })?;
-        Ok((status, headers, body.to_vec()))
+        })? {
+            if chunk.len() > MAX_TARGET_RESPONSE_BYTES.saturating_sub(body.len()) {
+                tracing::warn!("target response body exceeds limit");
+                return Err(PayloadError::TargetFailed);
+            }
+            body.extend_from_slice(&chunk);
+        }
+        Ok((status, headers, body))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::target_url;
+    use super::{Forwarder, MAX_TARGET_RESPONSE_BYTES, target_url};
+    use crate::bhttp::BinaryHttpRequest;
+    use crate::config::ForwardingConfig;
+    use crate::error::PayloadError;
 
     #[test]
     fn paths_cannot_change_the_destination() {
@@ -202,5 +221,47 @@ mod tests {
     fn target_preserves_encoded_path_query_and_ipv6_port() {
         let url = target_url("http", "[::1]:8080", "/a%2Fb?value=%2F&next=@host").unwrap();
         assert_eq!(url.as_str(), "http://[::1]:8080/a%2Fb?value=%2F&next=@host");
+    }
+
+    #[tokio::test]
+    async fn rejects_target_response_larger_than_limit() {
+        use tokio::io::AsyncWriteExt;
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let authority = listener.local_addr().unwrap().to_string();
+        let target = tokio::spawn(async move {
+            let (mut connection, _) = listener.accept().await.unwrap();
+            connection
+                .write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                        MAX_TARGET_RESPONSE_BYTES + 1
+                    )
+                    .as_bytes(),
+                )
+                .await
+                .unwrap();
+        });
+        let forwarder = Forwarder::new(
+            &ForwardingConfig {
+                allowed_targets: vec![authority.clone()],
+                rewrites: Default::default(),
+            },
+            false,
+        );
+        let request = BinaryHttpRequest {
+            method: reqwest::Method::GET,
+            scheme: "http".to_string(),
+            authority,
+            path: "/".to_string(),
+            headers: Default::default(),
+            body: Vec::new(),
+        };
+
+        assert!(matches!(
+            forwarder.forward(&request).await,
+            Err(PayloadError::TargetFailed)
+        ));
+        target.await.unwrap();
     }
 }

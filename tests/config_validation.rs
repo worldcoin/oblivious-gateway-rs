@@ -153,6 +153,25 @@ hex = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
 }
 
 #[test]
+fn rejects_route_paths_without_a_leading_slash() {
+    let file = write_temp(&VALID_BASE.replace(
+        "listen_addr = \"127.0.0.1:0\"",
+        "listen_addr = \"127.0.0.1:0\"\ngateway_path = \"gateway\"",
+    ));
+    let err = FileConfig::load(&file.path).unwrap_err();
+    assert!(format!("{err}").contains("gateway_path must start with '/'"));
+}
+
+#[test]
+fn rejects_metrics_path_without_a_leading_slash() {
+    let file = write_temp(&format!(
+        "{VALID_BASE}\n[metrics]\nlisten_addr = \"127.0.0.1:9090\"\npath = \"metrics\""
+    ));
+    let err = FileConfig::load(&file.path).unwrap_err();
+    assert!(format!("{err}").contains("metrics.path must start with '/'"));
+}
+
+#[test]
 fn rejects_missing_tls_cert_file() {
     let file = write_temp(
         r#"

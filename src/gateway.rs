@@ -30,6 +30,10 @@ const OHTTP_RESPONSE_CONTENT_TYPE: &str = "message/ohttp-res";
 /// README.md's "Known limitations"): 2 MiB.
 const MAX_ENCAPSULATED_REQUEST_BYTES: usize = 2 * 1024 * 1024;
 
+fn is_ohttp_request_content_type(value: Option<&str>) -> bool {
+    value.is_some_and(|value| value.eq_ignore_ascii_case(OHTTP_REQUEST_CONTENT_TYPE))
+}
+
 pub(crate) async fn method_not_allowed() -> Response {
     let mut metrics = RequestMetrics::start("gateway");
     metrics.set_outcome("invalid_method");
@@ -74,7 +78,7 @@ pub async fn gateway_handler(State(state): State<Arc<AppState>>, request: Reques
         .headers
         .get(header::CONTENT_TYPE)
         .and_then(|v| v.to_str().ok());
-    if content_type != Some(OHTTP_REQUEST_CONTENT_TYPE) {
+    if !is_ohttp_request_content_type(content_type) {
         return outer_error(&mut metrics, OuterError::InvalidContentType);
     }
 
@@ -158,7 +162,6 @@ async fn forward_binary_http_request(
         }
         Err(err) => {
             metrics.set_outcome(err.outcome());
-            crate::metrics::record_target_status(err.status());
             bhttp::encode_error_response(err.status(), &err.to_string())
         }
     }
@@ -190,4 +193,15 @@ pub async fn keys_handler(State(state): State<Arc<AppState>>) -> Response {
 /// backends.
 pub async fn health_handler() -> Response {
     (StatusCode::OK, "ok").into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_ohttp_request_content_type;
+
+    #[test]
+    fn ohttp_request_media_type_is_case_insensitive() {
+        assert!(is_ohttp_request_content_type(Some("Message/OHTTP-Req")));
+        assert!(!is_ohttp_request_content_type(Some("message/ohttp-res")));
+    }
 }

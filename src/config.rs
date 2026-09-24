@@ -32,6 +32,16 @@ fn default_shutdown_grace_seconds() -> u64 {
     30
 }
 
+fn validate_route_path(name: &str, path: &str) -> Result<(), StartupError> {
+    if path.starts_with('/') {
+        Ok(())
+    } else {
+        Err(StartupError::Config(format!(
+            "{name} must start with '/': {path:?}"
+        )))
+    }
+}
+
 /// The parsed contents of the TOML startup configuration file.
 #[derive(Debug, Deserialize)]
 pub struct FileConfig {
@@ -276,6 +286,13 @@ impl FileConfig {
             return Err(StartupError::Config(
                 "gateway_path, keys_path and health_path must be distinct".to_string(),
             ));
+        }
+
+        validate_route_path("gateway_path", &self.server.gateway_path)?;
+        validate_route_path("keys_path", &self.server.keys_path)?;
+        validate_route_path("health_path", &self.server.health_path)?;
+        if let Some(metrics) = &self.metrics {
+            validate_route_path("metrics.path", &metrics.path)?;
         }
 
         if let Some(tls) = &self.server.tls {

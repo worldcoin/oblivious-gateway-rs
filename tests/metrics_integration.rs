@@ -149,6 +149,10 @@ async fn gateway_request_updates_prometheus_counters() {
         "missing duration histogram:\n{rendered}"
     );
     assert!(
+        !rendered.contains("ohttp_gateway_target_status_total"),
+        "a forwarding failure must not be counted as a target response:\n{rendered}"
+    );
+    assert!(
         rendered.contains("route=\"gateway\""),
         "missing route label:\n{rendered}"
     );
