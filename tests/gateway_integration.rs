@@ -645,22 +645,35 @@ async fn decrypt_only_generation_still_decrypts_but_is_not_advertised() {
     let key_ring = KeyRing::load(&generations).unwrap();
     assert_eq!(key_ring.loaded_key_count(), 4);
 
-    // The retired generation's key is not in the advertised list...
-    let advertised = ohttp::KeyConfig::decode_list(key_ring.advertised_configs()).unwrap();
-    assert_eq!(advertised.len(), 2);
-    assert!(advertised.iter().all(|c| {
-        let id = c.encode().unwrap()[0];
-        id == 0 || id == 1
-    }));
+    let advertised_x25519 = key_config_for(&key_ring, 0);
+    let advertised_xwing = key_config_for(&key_ring, 1);
+    let expected_advertised = ohttp::KeyConfig::encode_list(&[
+        ohttp::KeyConfig::decode(&advertised_x25519).unwrap(),
+        ohttp::KeyConfig::decode(&advertised_xwing).unwrap(),
+    ])
+    .unwrap();
+    assert_eq!(key_ring.advertised_configs(), expected_advertised);
 
-    // ...but a client that already holds its (out-of-band-distributed)
-    // public config can still successfully decrypt through it.
+    // A client that already holds either retired public config can still
+    // decrypt through it, even though neither is advertised to new clients.
     let mut retired_seed =
         hex::decode("202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f").unwrap();
+    let retired_xwing_config = ohttp::KeyConfig::derive(
+        3,
+        ohttp::hpke::Kem::XWing,
+        vec![ohttp::SymmetricSuite::new(
+            ohttp::hpke::Kdf::HkdfSha256,
+            ohttp::hpke::Aead::Aes128Gcm,
+        )],
+        &retired_seed,
+    )
+    .unwrap()
+    .encode()
+    .unwrap();
     if let Some(last) = retired_seed.last_mut() {
         *last ^= 0xFF;
     }
-    let retired_config = ohttp::KeyConfig::derive(
+    let retired_x25519_config = ohttp::KeyConfig::derive(
         2,
         ohttp::hpke::Kem::X25519Sha256,
         vec![ohttp::SymmetricSuite::new(
@@ -674,11 +687,14 @@ async fn decrypt_only_generation_still_decrypts_but_is_not_advertised() {
     .unwrap();
 
     let app = build_app_with(key_ring, vec![authority.clone()]);
-    let (status, response_bytes) =
-        encrypted_gateway_request(app, &retired_config, "GET", "/", b"", &authority).await;
-    assert_eq!(status, StatusCode::OK);
-    let (binary_status, _) = decode_bhttp_response(&response_bytes);
-    assert_eq!(binary_status, 200);
+    for retired_config in [&retired_x25519_config, &retired_xwing_config] {
+        let (status, response_bytes) =
+            encrypted_gateway_request(app.clone(), retired_config, "GET", "/", b"", &authority)
+                .await;
+        assert_eq!(status, StatusCode::OK);
+        let (binary_status, _) = decode_bhttp_response(&response_bytes);
+        assert_eq!(binary_status, 200);
+    }
 }
 
 #[tokio::test]
