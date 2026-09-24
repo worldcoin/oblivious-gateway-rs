@@ -23,6 +23,12 @@ jobs:
     timeout-minutes: 30
     env:
       PROBE_IMAGE: ghcr.io/worldcoin/ohttp-tools/ohttp-probe:latest
+      KEM: ${{ matrix.kem }}
+      DURATION: ${{ inputs.duration }}
+      RATES: '1 10 100 1000 10000'
+      TARGET_URL: http://127.0.0.1:18080/
+      GATEWAY_URL: http://127.0.0.1:18081
+      METRICS_URL: http://127.0.0.1:19090/metrics
     services:
       target:
         image: nginx:alpine
@@ -49,15 +55,18 @@ jobs:
           curl -fsSLO "$release/vegeta_12.13.0_checksums.txt"
           grep 'vegeta_12.13.0_linux_amd64.tar.gz$' vegeta_12.13.0_checksums.txt | sha256sum --check --strict
           tar -xzf vegeta_12.13.0_linux_amd64.tar.gz vegeta
-      - name: Run local rate sweep
-        env:
-          DURATION: ${{ inputs.duration }}
-          KEM: ${{ matrix.kem }}
+      - name: Record test environment
         run: |
-          set -euo pipefail
           mkdir -p load-results
-          { git rev-parse HEAD; rustc --version; docker image inspect "$PROBE_IMAGE" --format '{{json .RepoDigests}}'; lscpu; } > load-results/environment.txt
-          probe=(docker run --rm --network host "$PROBE_IMAGE")
+          {
+            git rev-parse HEAD
+            rustc --version
+            docker image inspect "$PROBE_IMAGE" --format '{{json .RepoDigests}}'
+            lscpu
+          } > load-results/environment.txt
+
+      - name: Start gateway
+        run: |
           cat > "$RUNNER_TEMP/gateway.toml" <<'TOML'
           [server]
           listen_addr = "127.0.0.1:18081"
@@ -69,32 +78,83 @@ jobs:
           x25519 = { key_id = 0 }
           seed = { hex = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f" }
           TOML
-          target/release/oblivious-gateway --config "$RUNNER_TEMP/gateway.toml" > load-results/gateway.log 2>&1 &
-          gateway_pid=$!
-          trap 'kill "$gateway_pid" 2>/dev/null || true; wait "$gateway_pid" 2>/dev/null || true' EXIT
-          for url in http://127.0.0.1:18080/ http://127.0.0.1:18081/health http://127.0.0.1:19090/metrics; do
-            curl --retry 20 --retry-connrefused --retry-delay 1 --max-time 5 -fsS "$url" > /dev/null
+          nohup target/release/oblivious-gateway \
+            --config "$RUNNER_TEMP/gateway.toml" \
+            > load-results/gateway.log 2>&1 < /dev/null &
+          echo "GATEWAY_PID=$!" >> "$GITHUB_ENV"
+
+      - name: Wait for gateway and target
+        run: |
+          for url in "$TARGET_URL" "$GATEWAY_URL/health" "$METRICS_URL"; do
+            curl --fail --silent --show-error \
+              --retry 20 --retry-connrefused --retry-delay 1 --max-time 5 \
+              "$url" > /dev/null
           done
-          args=(-kem "$KEM" -relay-url http://127.0.0.1:18081/gateway -keys-url http://127.0.0.1:18081/ohttp-keys -target-url http://127.0.0.1:18080/ -t 35s)
-          "${probe[@]}" load "${args[@]}" -qps 100 -duration 3s > load-results/warmup.log 2>&1
-          printf '%s; all processes share the runner. Inspect achieved rate as well as errors. Probe latency includes client crypto and target time. Gateway timing histograms are in the artifacts.\n' "$KEM" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Measure target baseline
+        run: |
+          for rate in $RATES; do
+            echo "GET $TARGET_URL" | "$RUNNER_TEMP/vegeta" attack \
+              -rate "$rate/s" -duration "$DURATION" \
+              > "load-results/target-$rate.bin"
+            "$RUNNER_TEMP/vegeta" report "load-results/target-$rate.bin" \
+              > "load-results/target-$rate.txt"
+          done
+
+      - name: Warm up gateway
+        run: |
+          docker run --rm --network host "$PROBE_IMAGE" load \
+            -kem "$KEM" \
+            -relay-url "$GATEWAY_URL/gateway" \
+            -keys-url "$GATEWAY_URL/ohttp-keys" \
+            -target-url "$TARGET_URL" \
+            -qps 100 -duration 3s -t 35s \
+            > load-results/warmup.log 2>&1
+
+      - name: Measure gateway at each request rate
+        run: |
           failed=0
-          for rate in 1 10 100 1000 10000; do
-            # Check the static target independently at the same offered rate.
-            printf 'GET http://127.0.0.1:18080/\n' | "$RUNNER_TEMP/vegeta" attack -rate "$rate/s" -duration "$DURATION" > "load-results/target-$rate.bin"
-            "$RUNNER_TEMP/vegeta" report "load-results/target-$rate.bin" > "load-results/target-$rate.txt"
-            curl -fsS http://127.0.0.1:19090/metrics > "load-results/gateway-$rate-before.prom"
-            if ! "${probe[@]}" load "${args[@]}" -qps "$rate" -duration "$DURATION" > "load-results/ohttp-$rate.log" 2>&1; then failed=1; fi
-            curl -fsS http://127.0.0.1:19090/metrics > "load-results/gateway-$rate-after.prom"
-            {
-              printf '\n### %s RPS\n\nTarget baseline:\n~~~text\n' "$rate"
-              cat "load-results/target-$rate.txt"
-              printf '\n~~~\n\nOHTTP:\n~~~text\n'
-              cat "load-results/ohttp-$rate.log"
-              printf '\n~~~\n'
-            } >> "$GITHUB_STEP_SUMMARY"
+          for rate in $RATES; do
+            curl -fsS "$METRICS_URL" > "load-results/gateway-$rate-before.prom"
+            if ! docker run --rm --network host "$PROBE_IMAGE" load \
+              -kem "$KEM" \
+              -relay-url "$GATEWAY_URL/gateway" \
+              -keys-url "$GATEWAY_URL/ohttp-keys" \
+              -target-url "$TARGET_URL" \
+              -qps "$rate" -duration "$DURATION" -t 35s \
+              > "load-results/ohttp-$rate.log" 2>&1; then
+              echo "::error::$KEM failed at $rate RPS; see the load results"
+              failed=1
+            fi
+            curl -fsS "$METRICS_URL" > "load-results/gateway-$rate-after.prom"
           done
           exit "$failed"
+
+      - name: Summarize results
+        if: always()
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'SUMMARY'
+          All processes share the runner. Compare achieved rate with offered rate.
+          Probe latency includes client crypto and target time.
+          Gateway timing histograms are included in the artifacts.
+          SUMMARY
+          for result in load-results/target-*.txt load-results/ohttp-*.log; do
+            test -f "$result" || continue
+            {
+              echo "### $KEM — $(basename "$result")"
+              echo '~~~text'
+              cat "$result"
+              echo '~~~'
+            } >> "$GITHUB_STEP_SUMMARY"
+          done
+
+      - name: Stop gateway
+        if: always()
+        run: |
+          if [ -n "${GATEWAY_PID:-}" ]; then
+            kill "$GATEWAY_PID" 2>/dev/null || true
+          fi
+
       - name: Upload results
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
