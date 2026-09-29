@@ -90,6 +90,7 @@ fn build_app_with(key_ring: KeyRing, allowed_targets: Vec<String>) -> axum::Rout
     build_app_with_forwarding(
         key_ring,
         ForwardingConfig {
+            target_labels: Default::default(),
             allowed_targets,
             rewrites: Default::default(),
         },
@@ -505,6 +506,7 @@ async fn crafted_path_cannot_bypass_allowlist_or_override_rewrite() {
             let app = build_app_with_forwarding(
                 KeyRing::load(&test_generations()).unwrap(),
                 ForwardingConfig {
+                    target_labels: Default::default(),
                     allowed_targets: vec![authority.to_string()],
                     rewrites,
                 },
@@ -601,6 +603,7 @@ async fn rewrite_routes_request_to_configured_target() {
     let app = build_app_with_forwarding(
         key_ring,
         ForwardingConfig {
+            target_labels: Default::default(),
             allowed_targets: vec!["public.example.invalid".to_string()],
             rewrites,
         },

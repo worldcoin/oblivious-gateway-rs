@@ -65,6 +65,9 @@ pub struct RequestMetrics {
     outer_status: u16,
     kem: &'static str,
     key_id: Option<u8>,
+    target: Option<String>,
+    method: Option<&'static str>,
+    inner_status: Option<u16>,
 }
 
 impl RequestMetrics {
@@ -80,6 +83,9 @@ impl RequestMetrics {
             outer_status: 0,
             kem: "unknown",
             key_id: None,
+            target: None,
+            method: None,
+            inner_status: None,
         }
     }
 
@@ -102,10 +108,46 @@ impl RequestMetrics {
     pub fn set_outer_status(&mut self, status: u16) {
         self.outer_status = status;
     }
+
+    /// Attach safe access-log context without adding metric labels.
+    pub fn set_request_context(&mut self, target: Option<&str>, method: &str) {
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            self.target = target.map(str::to_owned);
+        }
+        // Extension methods are arbitrary client-controlled strings.
+        self.method = Some(match method {
+            "GET" => "GET",
+            "HEAD" => "HEAD",
+            "POST" => "POST",
+            "PUT" => "PUT",
+            "DELETE" => "DELETE",
+            "CONNECT" => "CONNECT",
+            "OPTIONS" => "OPTIONS",
+            "TRACE" => "TRACE",
+            "PATCH" => "PATCH",
+            _ => "OTHER",
+        });
+    }
+
+    /// Record the inner response status, including gateway-generated errors.
+    pub fn set_inner_status(&mut self, status: u16) {
+        self.inner_status = Some(status);
+    }
 }
 
 impl Drop for RequestMetrics {
     fn drop(&mut self) {
+        if self.route == "gateway" && self.outer_status != 0 {
+            tracing::debug!(
+                target = self.target.as_deref(),
+                method = self.method,
+                inner_status = self.inner_status,
+                outer_status = self.outer_status,
+                duration_ms = self.started_at.elapsed().as_secs_f64() * 1000.0,
+                outcome = self.outcome,
+                "gateway request completed"
+            );
+        }
         metrics::gauge!("ohttp_gateway_in_flight", "route" => self.route).decrement(1.0);
 
         let outer_status = self.outer_status.to_string();

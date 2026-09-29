@@ -141,10 +141,15 @@ async fn forward_binary_http_request(
         Ok(request) => request,
         Err(err) => {
             metrics.set_outcome(err.outcome());
+            metrics.set_inner_status(err.status());
             return bhttp::encode_error_response(err.status(), &err.to_string());
         }
     };
 
+    metrics.set_request_context(
+        state.forwarder.target_label(&binary_request.authority),
+        binary_request.method.as_str(),
+    );
     let started_at = Instant::now();
     let result = state.forwarder.forward(&binary_request).await;
     let upstream_outcome = match &result {
@@ -157,11 +162,13 @@ async fn forward_binary_http_request(
     match result {
         Ok((status, headers, response_body)) => {
             metrics.set_outcome("success");
+            metrics.set_inner_status(status);
             crate::metrics::record_target_status(status);
             bhttp::encode_response(status, &headers, &response_body)
         }
         Err(err) => {
             metrics.set_outcome(err.outcome());
+            metrics.set_inner_status(err.status());
             bhttp::encode_error_response(err.status(), &err.to_string())
         }
     }
