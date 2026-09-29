@@ -80,6 +80,10 @@ pub struct ForwardingConfig {
     /// `--allow-any-target`.
     #[serde(default)]
     pub allowed_targets: Vec<String>,
+    /// Optional log labels keyed by the original authority (before rewrites).
+    /// Values must be non-sensitive operator-chosen names, never URLs or secrets.
+    #[serde(default)]
+    pub target_labels: std::collections::HashMap<String, String>,
     /// Scheme/host rewrites applied after the allowlist check
     #[serde(default)]
     pub rewrites: std::collections::HashMap<String, RewriteTarget>,

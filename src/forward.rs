@@ -57,6 +57,7 @@ pub struct Forwarder {
     client: Client,
     allowed_targets: Option<HashSet<String>>,
     rewrites: HashMap<String, RewriteTarget>,
+    target_labels: HashMap<String, String>,
 }
 
 impl Forwarder {
@@ -90,7 +91,13 @@ impl Forwarder {
             client,
             allowed_targets,
             rewrites: config.rewrites.clone(),
+            target_labels: config.target_labels.clone(),
         }
+    }
+
+    /// Return only an operator-configured label, never the supplied authority.
+    pub fn target_label(&self, authority: &str) -> Option<&str> {
+        self.target_labels.get(authority).map(String::as_str)
     }
 
     async fn send(&self, request: &BinaryHttpRequest) -> Result<reqwest::Response, PayloadError> {
@@ -243,6 +250,7 @@ mod tests {
         });
         let forwarder = Forwarder::new(
             &ForwardingConfig {
+                target_labels: Default::default(),
                 allowed_targets: vec![authority.clone()],
                 rewrites: Default::default(),
             },

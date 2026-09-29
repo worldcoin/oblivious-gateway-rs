@@ -47,6 +47,7 @@ async fn gateway_request_updates_prometheus_counters() {
 
     let forwarder = Forwarder::new(
         &ForwardingConfig {
+            target_labels: Default::default(),
             allowed_targets: vec!["example.invalid".to_string()],
             rewrites: Default::default(),
         },
