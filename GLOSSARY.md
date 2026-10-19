@@ -41,7 +41,11 @@ Not in RFC 9458:
   code uses that directly (`src/bhttp.rs::BinaryHttpRequest`) rather than
   inventing an "Inner" counterpart to "Outer" above.
 
-## Where we knowingly diverge
+## Where we differ from the Go reference
+
+None of these depart from RFC 9458. Each is either a choice the RFC leaves
+open or, for the unknown-key status, a place where we follow the RFC and
+the Go reference does not.
 
 - **Unknown key ID → HTTP 400**, not the Go reference's 401. RFC 9458
   §9.5 registers the `ohttp-key` problem type with "Recommended HTTP

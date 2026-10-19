@@ -45,6 +45,8 @@ pub async fn install(listen_addr: &str, path: &str) -> Result<(), StartupError> 
         .map_err(|e| StartupError::Config(format!("installing Prometheus recorder: {e}")))?;
 
     let app = Router::new().route(path, get(render)).with_state(handle);
+    // No restart loop needed: `axum::serve` (0.7) retries accept errors
+    // internally and never returns while the runtime is alive.
     tokio::spawn(async move {
         if let Err(err) = axum::serve(listener, app).await {
             tracing::error!(error = %err, "metrics listener stopped");

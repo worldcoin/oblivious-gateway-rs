@@ -16,13 +16,17 @@ use oblivious_gateway::{build_router, metrics, tls};
 #[command(version, about)]
 struct Cli {
     /// Path to the TOML configuration file.
-    #[arg(long, default_value = "config/gateway.toml")]
+    #[arg(
+        long,
+        env = "OBLIVIOUS_GATEWAY_CONFIG",
+        default_value = "config/gateway.toml"
+    )]
     config: PathBuf,
 
     /// Disable target allowlisting and forward requests to any destination.
     /// Off by default: an allowlist is required unless this is set
     /// explicitly.
-    #[arg(long)]
+    #[arg(long, env = "OBLIVIOUS_GATEWAY_ALLOW_ANY_TARGET")]
     allow_any_target: bool,
 }
 

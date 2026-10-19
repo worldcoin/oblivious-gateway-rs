@@ -4,43 +4,10 @@
 
 use oblivious_gateway::config::FileConfig;
 
-fn write_temp(contents: &str) -> tempfile_like::TempFile {
-    tempfile_like::TempFile::new(contents)
-}
-
-/// Minimal stand-in for a temp file so this test suite doesn't need an
-/// extra dependency: writes to a unique path under `std::env::temp_dir()`
-/// and removes it on drop.
-mod tempfile_like {
-    use std::path::PathBuf;
-
-    pub struct TempFile {
-        pub path: PathBuf,
-    }
-
-    impl TempFile {
-        pub fn new(contents: &str) -> Self {
-            let path = std::env::temp_dir().join(format!(
-                "oblivious-gateway-test-{}-{}.toml",
-                std::process::id(),
-                super::unique_id()
-            ));
-            std::fs::write(&path, contents).unwrap();
-            Self { path }
-        }
-    }
-
-    impl Drop for TempFile {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_file(&self.path);
-        }
-    }
-}
-
-fn unique_id() -> u64 {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-    COUNTER.fetch_add(1, Ordering::Relaxed)
+fn write_temp(contents: &str) -> tempfile::NamedTempFile {
+    let mut file = tempfile::NamedTempFile::new().unwrap();
+    std::io::Write::write_all(&mut file, contents.as_bytes()).unwrap();
+    file
 }
 
 const VALID_BASE: &str = r#"
@@ -60,7 +27,7 @@ hex = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
 #[test]
 fn valid_config_loads() {
     let file = write_temp(VALID_BASE);
-    let config = FileConfig::load(&file.path).expect("valid config should load");
+    let config = FileConfig::load(file.path()).expect("valid config should load");
     assert_eq!(config.generations.len(), 1);
 }
 
@@ -77,7 +44,7 @@ listen_addr = "127.0.0.1:0"
 allowed_targets = ["example.invalid"]
 "#,
     );
-    let err = FileConfig::load(&file.path).unwrap_err();
+    let err = FileConfig::load(file.path()).unwrap_err();
     assert!(format!("{err}").contains("at least one key generation"));
 }
 
@@ -98,7 +65,7 @@ xwing = { key_id = 5 }
 hex = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
 "#,
     );
-    let err = FileConfig::load(&file.path).unwrap_err();
+    let err = FileConfig::load(file.path()).unwrap_err();
     assert!(format!("{err}").contains("identical"));
 }
 
@@ -125,7 +92,7 @@ xwing = { key_id = 2 }
 hex = "202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f"
 "#,
     );
-    let err = FileConfig::load(&file.path).unwrap_err();
+    let err = FileConfig::load(file.path()).unwrap_err();
     assert!(format!("{err}").contains("duplicate key identifier"));
 }
 
@@ -148,7 +115,7 @@ xwing = { key_id = 1 }
 hex = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
 "#,
     );
-    let err = FileConfig::load(&file.path).unwrap_err();
+    let err = FileConfig::load(file.path()).unwrap_err();
     assert!(format!("{err}").contains("distinct"));
 }
 
@@ -158,7 +125,7 @@ fn rejects_route_paths_without_a_leading_slash() {
         "listen_addr = \"127.0.0.1:0\"",
         "listen_addr = \"127.0.0.1:0\"\ngateway_path = \"gateway\"",
     ));
-    let err = FileConfig::load(&file.path).unwrap_err();
+    let err = FileConfig::load(file.path()).unwrap_err();
     assert!(format!("{err}").contains("gateway_path must start with '/'"));
 }
 
@@ -167,7 +134,7 @@ fn rejects_metrics_path_without_a_leading_slash() {
     let file = write_temp(&format!(
         "{VALID_BASE}\n[metrics]\nlisten_addr = \"127.0.0.1:9090\"\npath = \"metrics\""
     ));
-    let err = FileConfig::load(&file.path).unwrap_err();
+    let err = FileConfig::load(file.path()).unwrap_err();
     assert!(format!("{err}").contains("metrics.path must start with '/'"));
 }
 
@@ -191,7 +158,7 @@ xwing = { key_id = 1 }
 hex = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
 "#,
     );
-    let err = FileConfig::load(&file.path).unwrap_err();
+    let err = FileConfig::load(file.path()).unwrap_err();
     assert!(format!("{err}").contains("cert_file not found"));
 }
 
@@ -214,7 +181,7 @@ xwing = { key_id = 1 }
 hex = "0001020304"
 "#,
     );
-    let config = FileConfig::load(&file.path).expect("TOML shape is valid");
+    let config = FileConfig::load(file.path()).expect("TOML shape is valid");
     let err = KeyRing::load(&config.generations).err().unwrap();
     assert!(format!("{err}").contains("need at least"));
 }
@@ -232,7 +199,7 @@ x25519 = { key_id = 0 }
 seed = { hex = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f" }
 "#,
     );
-    let config = FileConfig::load(&defaulted.path).unwrap();
+    let config = FileConfig::load(defaulted.path()).unwrap();
     assert_eq!(config.generations[0].x25519_key_id(), 0);
     assert_eq!(config.generations[0].xwing_key_id(), 128);
     assert!(config.generations[0].advertise);
@@ -249,7 +216,7 @@ x25519 = { key_id = 5 }
 seed = { hex = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f" }
 "#,
     );
-    let config = FileConfig::load(&derived.path).unwrap();
+    let config = FileConfig::load(derived.path()).unwrap();
     assert_eq!(config.generations[0].x25519_key_id(), 5);
     assert_eq!(config.generations[0].xwing_key_id(), 133);
 
@@ -266,7 +233,7 @@ xwing = { key_id = 200 }
 seed = { hex = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f" }
 "#,
     );
-    let config = FileConfig::load(&explicit.path).unwrap();
+    let config = FileConfig::load(explicit.path()).unwrap();
     assert_eq!(config.generations[0].x25519_key_id(), 5);
     assert_eq!(config.generations[0].xwing_key_id(), 200);
 }
@@ -281,7 +248,7 @@ fn every_generation_requires_an_x25519_key_id() {
             format!("{VALID_BASE}\n[[generations]]{generation}"),
         ] {
             let file = write_temp(&contents);
-            let err = FileConfig::load(&file.path).unwrap_err();
+            let err = FileConfig::load(file.path()).unwrap_err();
             assert!(format!("{err}").contains(&format!("missing field `{missing}`")));
         }
     }

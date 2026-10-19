@@ -26,13 +26,18 @@ cargo run -- --config config/gateway.toml
 `forwarding.allowed_targets` must be non-empty unless you pass
 `--allow-any-target` (development only; logs a startup warning).
 
+Both flags can also be set from the environment:
+`OBLIVIOUS_GATEWAY_CONFIG=<path>` and
+`OBLIVIOUS_GATEWAY_ALLOW_ANY_TARGET=true`. A command-line flag takes
+precedence over its environment variable.
+
 ## Endpoints
 
 | Path (configurable) | Method | Behavior |
 |---|---|---|
 | `/gateway` | `POST` | Decrypt → forward → re-encrypt. Requires `Content-Type: message/ohttp-req`. |
 | `/ohttp-keys` | any | `application/ohttp-keys` list of advertised key configs. |
-| `/health` | any | Liveness only; does not poll backends. |
+| `/health` | `GET` | Liveness only; does not poll backends. |
 | `/metrics` (separate listener) | `GET` | Prometheus scrape endpoint. |
 
 Unknown routes → 404. Pre-decryption failures are plaintext outer 400s
