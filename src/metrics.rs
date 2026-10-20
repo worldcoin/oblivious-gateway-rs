@@ -19,8 +19,8 @@ async fn render(State(handle): State<PrometheusHandle>) -> String {
     handle.render()
 }
 
-/// Install the global Prometheus recorder and serve it on its own listener
-/// and path. Must be called from within a Tokio runtime; the listener
+/// Install the global Prometheus recorder and serve it at `/metrics` on its
+/// own listener. Must be called from within a Tokio runtime; the listener
 /// itself is spawned as a background task and outlives this function.
 ///
 /// # Errors
@@ -29,7 +29,7 @@ async fn render(State(handle): State<PrometheusHandle>) -> String {
 /// socket address, or if installing the global Prometheus recorder fails
 /// (e.g. one is already installed). Returns [`StartupError::Io`] if the
 /// listener cannot bind; the recorder is not installed in that case.
-pub async fn install(listen_addr: &str, path: &str) -> Result<(), StartupError> {
+pub async fn install(listen_addr: &str) -> Result<(), StartupError> {
     let addr: SocketAddr = listen_addr
         .parse()
         .map_err(|e| StartupError::Config(format!("invalid metrics listen_addr: {e}")))?;
@@ -44,7 +44,9 @@ pub async fn install(listen_addr: &str, path: &str) -> Result<(), StartupError> 
         .install_recorder()
         .map_err(|e| StartupError::Config(format!("installing Prometheus recorder: {e}")))?;
 
-    let app = Router::new().route(path, get(render)).with_state(handle);
+    let app = Router::new()
+        .route("/metrics", get(render))
+        .with_state(handle);
     // No restart loop needed: `axum::serve` (0.7) retries accept errors
     // internally and never returns while the runtime is alive.
     tokio::spawn(async move {

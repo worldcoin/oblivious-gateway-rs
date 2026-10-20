@@ -97,45 +97,26 @@ hex = "202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f"
 }
 
 #[test]
-fn rejects_colliding_route_paths() {
-    let file = write_temp(
-        r#"
-[server]
-listen_addr = "127.0.0.1:0"
-gateway_path = "/same"
-keys_path = "/same"
-
-[forwarding]
-allowed_targets = ["example.invalid"]
-
-[[generations]]
-x25519 = { key_id = 0 }
-xwing = { key_id = 1 }
-[generations.seed]
-hex = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
-"#,
-    );
-    let err = FileConfig::load(file.path()).unwrap_err();
-    assert!(format!("{err}").contains("distinct"));
-}
-
-#[test]
-fn rejects_route_paths_without_a_leading_slash() {
-    let file = write_temp(&VALID_BASE.replace(
-        "listen_addr = \"127.0.0.1:0\"",
-        "listen_addr = \"127.0.0.1:0\"\ngateway_path = \"gateway\"",
-    ));
-    let err = FileConfig::load(file.path()).unwrap_err();
-    assert!(format!("{err}").contains("gateway_path must start with '/'"));
-}
-
-#[test]
-fn rejects_metrics_path_without_a_leading_slash() {
+fn rejects_removed_route_path_settings() {
+    for (section, setting) in [
+        (
+            "listen_addr = \"127.0.0.1:0\"",
+            "gateway_path = \"/custom\"",
+        ),
+        ("listen_addr = \"127.0.0.1:0\"", "health_path = \"/custom\""),
+    ] {
+        let file = write_temp(&VALID_BASE.replace(section, &format!("{section}\n{setting}")));
+        let err = FileConfig::load(file.path()).unwrap_err();
+        assert!(
+            format!("{err}").contains("unknown field"),
+            "{setting}: {err}"
+        );
+    }
     let file = write_temp(&format!(
-        "{VALID_BASE}\n[metrics]\nlisten_addr = \"127.0.0.1:9090\"\npath = \"metrics\""
+        "{VALID_BASE}\n[metrics]\nlisten_addr = \"127.0.0.1:9090\"\npath = \"/custom\""
     ));
     let err = FileConfig::load(file.path()).unwrap_err();
-    assert!(format!("{err}").contains("metrics.path must start with '/'"));
+    assert!(format!("{err}").contains("unknown field"), "{err}");
 }
 
 #[test]

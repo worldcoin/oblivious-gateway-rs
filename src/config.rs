@@ -13,33 +13,11 @@ use crate::error::StartupError;
 /// (32 bytes: as many bits of entropy as an X25519 secret key).
 pub const MIN_SEED_LEN: usize = 32;
 
-fn default_gateway_path() -> String {
-    "/gateway".to_string()
-}
-fn default_keys_path() -> String {
-    "/ohttp-keys".to_string()
-}
-fn default_health_path() -> String {
-    "/health".to_string()
-}
-fn default_metrics_path() -> String {
-    "/metrics".to_string()
-}
 fn default_advertise() -> bool {
     true
 }
 fn default_shutdown_grace_seconds() -> u64 {
     30
-}
-
-fn validate_route_path(name: &str, path: &str) -> Result<(), StartupError> {
-    if path.starts_with('/') {
-        Ok(())
-    } else {
-        Err(StartupError::Config(format!(
-            "{name} must start with '/': {path:?}"
-        )))
-    }
 }
 
 /// The parsed contents of the TOML startup configuration file.
@@ -59,18 +37,10 @@ pub struct FileConfig {
 
 /// `[server]`: the gateway's own HTTP listener.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ServerConfig {
     /// Address to listen on, e.g. `"0.0.0.0:8080"`.
     pub listen_addr: String,
-    /// Path serving `POST /gateway`. Defaults to `/gateway`.
-    #[serde(default = "default_gateway_path")]
-    pub gateway_path: String,
-    /// Path serving `GET /ohttp-keys`. Defaults to `/ohttp-keys`.
-    #[serde(default = "default_keys_path")]
-    pub keys_path: String,
-    /// Path serving `GET /health`. Defaults to `/health`.
-    #[serde(default = "default_health_path")]
-    pub health_path: String,
     /// How long to wait for in-flight requests to finish during shutdown,
     /// before forcing the process to exit. Defaults to 30 seconds.
     #[serde(default = "default_shutdown_grace_seconds")]
@@ -90,16 +60,15 @@ pub struct TlsConfig {
     pub key_file: String,
 }
 
-/// `[metrics]`: the separate Prometheus scrape listener.
+/// `[metrics]`: the separate Prometheus scrape listener, serving
+/// `GET /metrics`.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct MetricsConfig {
     /// Address to listen on, e.g. `"127.0.0.1:9090"`. Kept separate from
     /// `server.listen_addr` so it can be bound to a different, typically
     /// non-public, interface.
     pub listen_addr: String,
-    /// Scrape path. Defaults to `/metrics`.
-    #[serde(default = "default_metrics_path")]
-    pub path: String,
 }
 
 /// `[forwarding]`: which targets the gateway will forward decapsulated
@@ -239,7 +208,7 @@ impl FileConfig {
     ///
     /// Returns [`StartupError::Config`] if the file can't be read or
     /// parsed, or if it fails validation (duplicate key IDs, an empty
-    /// generation list, colliding endpoint paths). Returns
+    /// generation list). Returns
     /// [`StartupError::Tls`] if `[server.tls]` references a missing
     /// certificate or key file.
     pub fn load(path: &Path) -> Result<Self, StartupError> {
@@ -274,25 +243,6 @@ impl FileConfig {
                     )));
                 }
             }
-        }
-
-        let paths = [
-            &self.server.gateway_path,
-            &self.server.keys_path,
-            &self.server.health_path,
-        ];
-        let unique_paths: HashSet<&String> = paths.iter().copied().collect();
-        if unique_paths.len() != paths.len() {
-            return Err(StartupError::Config(
-                "gateway_path, keys_path and health_path must be distinct".to_string(),
-            ));
-        }
-
-        validate_route_path("gateway_path", &self.server.gateway_path)?;
-        validate_route_path("keys_path", &self.server.keys_path)?;
-        validate_route_path("health_path", &self.server.health_path)?;
-        if let Some(metrics) = &self.metrics {
-            validate_route_path("metrics.path", &metrics.path)?;
         }
 
         if let Some(tls) = &self.server.tls {

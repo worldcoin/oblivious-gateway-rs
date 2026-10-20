@@ -24,7 +24,7 @@ async fn gateway_request_updates_prometheus_counters() {
     let reservation = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let metrics_addr = reservation.local_addr().unwrap();
     drop(reservation);
-    oblivious_gateway::metrics::install(&metrics_addr.to_string(), "/metrics")
+    oblivious_gateway::metrics::install(&metrics_addr.to_string())
         .await
         .unwrap();
 
@@ -56,15 +56,7 @@ async fn gateway_request_updates_prometheus_counters() {
         key_ring,
         forwarder,
     });
-    let server_config = oblivious_gateway::config::ServerConfig {
-        listen_addr: "127.0.0.1:0".to_string(),
-        gateway_path: "/gateway".to_string(),
-        keys_path: "/ohttp-keys".to_string(),
-        health_path: "/health".to_string(),
-        shutdown_grace_seconds: 1,
-        tls: None,
-    };
-    let app = oblivious_gateway::build_router(state, &server_config);
+    let app = oblivious_gateway::build_router(state);
 
     // A request to a target that isn't reachable: this only exercises
     // telemetry accounting, not a successful forward.

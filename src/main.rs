@@ -70,7 +70,7 @@ async fn run() -> Result<(), StartupError> {
         "key ring loaded"
     );
     if let Some(metrics_config) = &file_config.metrics {
-        metrics::install(&metrics_config.listen_addr, &metrics_config.path).await?;
+        metrics::install(&metrics_config.listen_addr).await?;
         metrics::set_key_gauges(
             key_ring.loaded_key_count(),
             key_ring.advertised_x25519_count(),
@@ -85,7 +85,7 @@ async fn run() -> Result<(), StartupError> {
         key_ring,
         forwarder,
     });
-    let app = build_router(state, &file_config.server);
+    let app = build_router(state);
 
     let addr: std::net::SocketAddr = file_config
         .server

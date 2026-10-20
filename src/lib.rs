@@ -37,19 +37,17 @@ use std::sync::Arc;
 use axum::Router;
 use axum::routing::{any, get, post};
 
-use crate::config::ServerConfig;
 use crate::gateway::AppState;
 
-/// Build the gateway's router: `/gateway`, `/ohttp-keys` and `/health` at
-/// their configured paths. Unknown routes fall through to axum's default
-/// 404.
-pub fn build_router(state: Arc<AppState>, server: &ServerConfig) -> Router {
+/// Build the gateway's router: `/gateway`, `/ohttp-keys` and `/health`.
+/// Unknown routes fall through to axum's default 404.
+pub fn build_router(state: Arc<AppState>) -> Router {
     Router::new()
         .route(
-            &server.gateway_path,
+            "/gateway",
             post(gateway::gateway_handler).fallback(gateway::method_not_allowed),
         )
-        .route(&server.keys_path, any(gateway::keys_handler))
-        .route(&server.health_path, get(gateway::health_handler))
+        .route("/ohttp-keys", any(gateway::keys_handler))
+        .route("/health", get(gateway::health_handler))
         .with_state(state)
 }

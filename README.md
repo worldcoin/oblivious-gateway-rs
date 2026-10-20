@@ -33,7 +33,7 @@ precedence over its environment variable.
 
 ## Endpoints
 
-| Path (configurable) | Method | Behavior |
+| Path | Method | Behavior |
 |---|---|---|
 | `/gateway` | `POST` | Decrypt → forward → re-encrypt. Requires `Content-Type: message/ohttp-req`. |
 | `/ohttp-keys` | any | `application/ohttp-keys` list of advertised key configs. |
@@ -49,7 +49,7 @@ response with the outer status held at 200.
 ## Configuration
 
 See [`config/gateway.example.toml`](config/gateway.example.toml) for a
-fully commented example: `[server]` (listen address, paths, optional
+fully commented example: `[server]` (listen address, optional
 `[server.tls]` for HTTPS), `[metrics]` (optional), `[forwarding]`
 (`allowed_targets`, optional `rewrites`), and one or more `[[generations]]`.
 
