@@ -151,15 +151,7 @@ fn build_app_with_forwarding(key_ring: KeyRing, forwarding: ForwardingConfig) ->
         key_ring,
         forwarder,
     });
-    let server_config = oblivious_gateway::config::ServerConfig {
-        listen_addr: "127.0.0.1:0".to_string(),
-        gateway_path: "/gateway".to_string(),
-        keys_path: "/ohttp-keys".to_string(),
-        health_path: "/health".to_string(),
-        shutdown_grace_seconds: 1,
-        tls: None,
-    };
-    oblivious_gateway::build_router(state, &server_config)
+    oblivious_gateway::build_router(state)
 }
 
 async fn encrypted_gateway_request(
