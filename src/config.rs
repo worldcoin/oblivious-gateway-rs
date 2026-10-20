@@ -5,9 +5,8 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
 
+use eyre::{WrapErr, bail};
 use serde::Deserialize;
-
-use crate::error::StartupError;
 
 /// Minimum seed length
 /// (32 bytes: as many bits of entropy as an X25519 secret key).
@@ -185,19 +184,18 @@ impl SeedSource {
     ///
     /// # Errors
     ///
-    /// Returns [`StartupError::Key`] if the environment variable is unset,
-    /// the file can't be read, or the resolved text isn't valid hex.
-    pub fn resolve(&self) -> Result<Vec<u8>, StartupError> {
+    /// Fails if the environment variable is unset, the file can't be read,
+    /// or the resolved text isn't valid hex.
+    pub fn resolve(&self) -> eyre::Result<Vec<u8>> {
         let hex_str = match self {
             Self::Hex(s) => s.clone(),
-            Self::Env(name) => std::env::var(name).map_err(|_| {
-                StartupError::Key(format!("environment variable {name} is not set"))
-            })?,
-            Self::File(path) => fs::read_to_string(path)
-                .map_err(|e| StartupError::Key(format!("reading seed file {path}: {e}")))?,
+            Self::Env(name) => std::env::var(name)
+                .wrap_err_with(|| format!("reading seed from environment variable {name}"))?,
+            Self::File(path) => {
+                fs::read_to_string(path).wrap_err_with(|| format!("reading seed file {path}"))?
+            }
         };
-        let trimmed = hex_str.trim();
-        hex::decode(trimmed).map_err(|e| StartupError::Key(format!("seed is not valid hex: {e}")))
+        hex::decode(hex_str.trim()).wrap_err("seed is not valid hex")
     }
 }
 
@@ -206,57 +204,49 @@ impl FileConfig {
     ///
     /// # Errors
     ///
-    /// Returns [`StartupError::Config`] if the file can't be read or
-    /// parsed, or if it fails validation (duplicate key IDs, an empty
-    /// generation list). Returns
-    /// [`StartupError::Tls`] if `[server.tls]` references a missing
-    /// certificate or key file.
-    pub fn load(path: &Path) -> Result<Self, StartupError> {
-        let raw = fs::read_to_string(path)?;
+    /// Fails if the file can't be read or parsed, or if it fails
+    /// validation (duplicate key IDs, an empty generation list, or a
+    /// `[server.tls]` section referencing a missing certificate or key
+    /// file).
+    pub fn load(path: &Path) -> eyre::Result<Self> {
+        let raw = fs::read_to_string(path)
+            .wrap_err_with(|| format!("reading config file {}", path.display()))?;
         let config: Self = toml::from_str(&raw)
-            .map_err(|e| StartupError::Config(format!("parsing {}: {e}", path.display())))?;
+            .wrap_err_with(|| format!("parsing config file {}", path.display()))?;
         config.validate()?;
         Ok(config)
     }
 
-    fn validate(&self) -> Result<(), StartupError> {
+    fn validate(&self) -> eyre::Result<()> {
         if self.generations.is_empty() {
-            return Err(StartupError::Config(
-                "at least one key generation is required".to_string(),
-            ));
+            bail!("at least one key generation is required");
         }
 
         let mut seen_ids: HashSet<u8> = HashSet::new();
         for generation in &self.generations {
             let (x25519_id, xwing_id) = (generation.x25519_key_id(), generation.xwing_key_id());
             if x25519_id == xwing_id {
-                return Err(StartupError::Config(format!(
+                bail!(
                     "generation has identical x25519 and xwing key IDs ({x25519_id}); set an \
                      explicit key_id for at least one of them"
-                )));
+                );
             }
             for id in [x25519_id, xwing_id] {
                 if !seen_ids.insert(id) {
-                    return Err(StartupError::Config(format!(
+                    bail!(
                         "duplicate key identifier {id} across generations; set an explicit \
                          key_id to resolve the conflict"
-                    )));
+                    );
                 }
             }
         }
 
         if let Some(tls) = &self.server.tls {
             if !Path::new(&tls.cert_file).is_file() {
-                return Err(StartupError::Tls(format!(
-                    "cert_file not found: {}",
-                    tls.cert_file
-                )));
+                bail!("TLS cert_file not found: {}", tls.cert_file);
             }
             if !Path::new(&tls.key_file).is_file() {
-                return Err(StartupError::Tls(format!(
-                    "key_file not found: {}",
-                    tls.key_file
-                )));
+                bail!("TLS key_file not found: {}", tls.key_file);
             }
         }
 

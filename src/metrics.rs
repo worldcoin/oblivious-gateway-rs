@@ -13,7 +13,7 @@ use axum::extract::State;
 use axum::routing::get;
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 
-use crate::error::StartupError;
+use eyre::WrapErr;
 
 async fn render(State(handle): State<PrometheusHandle>) -> String {
     handle.render()
@@ -25,24 +25,26 @@ async fn render(State(handle): State<PrometheusHandle>) -> String {
 ///
 /// # Errors
 ///
-/// Returns [`StartupError::Config`] if `listen_addr` doesn't parse as a
-/// socket address, or if installing the global Prometheus recorder fails
-/// (e.g. one is already installed). Returns [`StartupError::Io`] if the
-/// listener cannot bind; the recorder is not installed in that case.
-pub async fn install(listen_addr: &str) -> Result<(), StartupError> {
+/// Fails if `listen_addr` doesn't parse as a socket address, if the
+/// listener cannot bind (the recorder is not installed in that case), or if
+/// installing the global Prometheus recorder fails (e.g. one is already
+/// installed).
+pub async fn install(listen_addr: &str) -> eyre::Result<()> {
     let addr: SocketAddr = listen_addr
         .parse()
-        .map_err(|e| StartupError::Config(format!("invalid metrics listen_addr: {e}")))?;
+        .wrap_err_with(|| format!("invalid metrics listen_addr {listen_addr:?}"))?;
 
-    let listener = tokio::net::TcpListener::bind(addr).await?;
+    let listener = tokio::net::TcpListener::bind(addr)
+        .await
+        .wrap_err_with(|| format!("binding metrics listener on {addr}"))?;
 
     let handle = PrometheusBuilder::new()
         .set_buckets(&[
             0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0,
         ])
-        .map_err(|e| StartupError::Config(format!("configuring histogram buckets: {e}")))?
+        .wrap_err("configuring histogram buckets")?
         .install_recorder()
-        .map_err(|e| StartupError::Config(format!("installing Prometheus recorder: {e}")))?;
+        .wrap_err("installing Prometheus recorder")?;
 
     let app = Router::new()
         .route("/metrics", get(render))

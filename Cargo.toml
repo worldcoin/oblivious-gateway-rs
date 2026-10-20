@@ -18,6 +18,7 @@ axum = "0.7"
 axum-server = { version = "0.8.0", features = ["tls-rustls"] }
 bhttp = { version = "0.5", features = ["bhttp", "read-bhttp", "write-bhttp"] }
 clap = { version = "4.6.7", features = ["derive", "env"] }
+eyre = "0.6"
 hex = "0.4.3"
 metrics = "0.24"
 metrics-exporter-prometheus = "0.16"

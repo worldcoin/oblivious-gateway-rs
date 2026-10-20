@@ -45,7 +45,7 @@ allowed_targets = ["example.invalid"]
 "#,
     );
     let err = FileConfig::load(file.path()).unwrap_err();
-    assert!(format!("{err}").contains("at least one key generation"));
+    assert!(format!("{err:#}").contains("at least one key generation"));
 }
 
 #[test]
@@ -66,7 +66,7 @@ hex = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
 "#,
     );
     let err = FileConfig::load(file.path()).unwrap_err();
-    assert!(format!("{err}").contains("identical"));
+    assert!(format!("{err:#}").contains("identical"));
 }
 
 #[test]
@@ -93,7 +93,7 @@ hex = "202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f"
 "#,
     );
     let err = FileConfig::load(file.path()).unwrap_err();
-    assert!(format!("{err}").contains("duplicate key identifier"));
+    assert!(format!("{err:#}").contains("duplicate key identifier"));
 }
 
 #[test]
@@ -108,15 +108,15 @@ fn rejects_removed_route_path_settings() {
         let file = write_temp(&VALID_BASE.replace(section, &format!("{section}\n{setting}")));
         let err = FileConfig::load(file.path()).unwrap_err();
         assert!(
-            format!("{err}").contains("unknown field"),
-            "{setting}: {err}"
+            format!("{err:#}").contains("unknown field"),
+            "{setting}: {err:#}"
         );
     }
     let file = write_temp(&format!(
         "{VALID_BASE}\n[metrics]\nlisten_addr = \"127.0.0.1:9090\"\npath = \"/custom\""
     ));
     let err = FileConfig::load(file.path()).unwrap_err();
-    assert!(format!("{err}").contains("unknown field"), "{err}");
+    assert!(format!("{err:#}").contains("unknown field"), "{err:#}");
 }
 
 #[test]
@@ -140,7 +140,7 @@ hex = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
 "#,
     );
     let err = FileConfig::load(file.path()).unwrap_err();
-    assert!(format!("{err}").contains("cert_file not found"));
+    assert!(format!("{err:#}").contains("cert_file not found"));
 }
 
 #[test]
@@ -164,7 +164,7 @@ hex = "0001020304"
     );
     let config = FileConfig::load(file.path()).expect("TOML shape is valid");
     let err = KeyRing::load(&config.generations).err().unwrap();
-    assert!(format!("{err}").contains("need at least"));
+    assert!(format!("{err:#}").contains("need at least"));
 }
 
 #[test]
@@ -230,7 +230,7 @@ fn every_generation_requires_an_x25519_key_id() {
         ] {
             let file = write_temp(&contents);
             let err = FileConfig::load(file.path()).unwrap_err();
-            assert!(format!("{err}").contains(&format!("missing field `{missing}`")));
+            assert!(format!("{err:#}").contains(&format!("missing field `{missing}`")));
         }
     }
 }

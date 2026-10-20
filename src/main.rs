@@ -3,9 +3,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use clap::Parser;
+use eyre::{WrapErr, bail};
 
 use oblivious_gateway::config::FileConfig;
-use oblivious_gateway::error::StartupError;
 use oblivious_gateway::forward::Forwarder;
 use oblivious_gateway::gateway::AppState;
 use oblivious_gateway::keys::KeyRing;
@@ -41,12 +41,12 @@ async fn main() {
         .init();
 
     if let Err(err) = run().await {
-        tracing::error!(error = %err, "startup failed");
+        tracing::error!(error = ?err, "startup failed");
         std::process::exit(1);
     }
 }
 
-async fn run() -> Result<(), StartupError> {
+async fn run() -> eyre::Result<()> {
     let cli = Cli::parse();
     let file_config = FileConfig::load(&cli.config)?;
 
@@ -55,11 +55,10 @@ async fn run() -> Result<(), StartupError> {
             "--allow-any-target is set: outbound requests are not restricted to an allowlist"
         );
     } else if file_config.forwarding.allowed_targets.is_empty() {
-        return Err(StartupError::Config(
+        bail!(
             "forwarding.allowed_targets is empty; pass --allow-any-target to explicitly allow \
              unrestricted destinations"
-                .to_string(),
-        ));
+        );
     }
 
     let key_ring = KeyRing::load(&file_config.generations)?;
@@ -87,11 +86,13 @@ async fn run() -> Result<(), StartupError> {
     });
     let app = build_router(state);
 
-    let addr: std::net::SocketAddr = file_config
-        .server
-        .listen_addr
-        .parse()
-        .map_err(|e| StartupError::Config(format!("invalid server.listen_addr: {e}")))?;
+    let addr: std::net::SocketAddr =
+        file_config.server.listen_addr.parse().wrap_err_with(|| {
+            format!(
+                "invalid server.listen_addr {:?}",
+                file_config.server.listen_addr
+            )
+        })?;
 
     let handle = axum_server::Handle::new();
     let shutdown_handle = handle.clone();
@@ -108,13 +109,15 @@ async fn run() -> Result<(), StartupError> {
         axum_server::bind_rustls(addr, rustls_config)
             .handle(handle)
             .serve(app.into_make_service())
-            .await?;
+            .await
+            .wrap_err_with(|| format!("serving TLS on {addr}"))?;
     } else {
         tracing::info!(%addr, "listening (plaintext)");
         axum_server::bind(addr)
             .handle(handle)
             .serve(app.into_make_service())
-            .await?;
+            .await
+            .wrap_err_with(|| format!("serving on {addr}"))?;
     }
 
     Ok(())
