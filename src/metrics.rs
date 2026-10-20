@@ -6,7 +6,7 @@
 //! headers, bodies, seeds or client identifiers are recorded.
 
 use std::net::SocketAddr;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use axum::Router;
 use axum::extract::State;
@@ -14,6 +14,10 @@ use axum::routing::get;
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 
 use eyre::WrapErr;
+
+/// Pause before rebinding a stopped metrics listener, so a persistent
+/// failure doesn't spin.
+const METRICS_RESTART_DELAY: Duration = Duration::from_secs(1);
 
 async fn render(State(handle): State<PrometheusHandle>) -> String {
     handle.render()
@@ -34,7 +38,7 @@ pub async fn install(listen_addr: &str) -> eyre::Result<()> {
         .parse()
         .wrap_err_with(|| format!("invalid metrics listen_addr {listen_addr:?}"))?;
 
-    let listener = tokio::net::TcpListener::bind(addr)
+    let mut listener = tokio::net::TcpListener::bind(addr)
         .await
         .wrap_err_with(|| format!("binding metrics listener on {addr}"))?;
 
@@ -49,11 +53,20 @@ pub async fn install(listen_addr: &str) -> eyre::Result<()> {
     let app = Router::new()
         .route("/metrics", get(render))
         .with_state(handle);
-    // No restart loop needed: `axum::serve` (0.7) retries accept errors
-    // internally and never returns while the runtime is alive.
+    // `axum::serve` (0.7) retries accept errors internally and does not
+    // return in practice; if it ever does, rebind and keep serving rather
+    // than leave the gateway running without metrics.
     tokio::spawn(async move {
-        if let Err(err) = axum::serve(listener, app).await {
-            tracing::error!(error = %err, "metrics listener stopped");
+        loop {
+            let result = axum::serve(listener, app.clone()).await;
+            tracing::error!(?result, "metrics listener stopped; restarting");
+            listener = loop {
+                tokio::time::sleep(METRICS_RESTART_DELAY).await;
+                match tokio::net::TcpListener::bind(addr).await {
+                    Ok(listener) => break listener,
+                    Err(err) => tracing::error!(error = %err, "rebinding metrics listener failed"),
+                }
+            };
         }
     });
 
