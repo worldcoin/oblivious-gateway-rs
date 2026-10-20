@@ -136,7 +136,9 @@ action (same pattern as `world-chain-rundler`).
 - **Outbound timeouts**: hardcoded 10s connect / 30s request timeout
   (`src/forward.rs`) — a deliberate departure from "use library defaults"
   to avoid unbounded resource exhaustion. Not yet operator-configurable.
-  Inbound listener still has none.
+  Inbound, a client gets 30s to send the Encapsulated Request body
+  (`src/gateway.rs`); other inbound timeouts are the server library's
+  defaults.
 - **Redirects trusted**: allowlist checked only on the initial
   destination (deliberate — see `GLOSSARY.md`); an allowed target can
   redirect anywhere, including internal addresses.
