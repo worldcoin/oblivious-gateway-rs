@@ -26,13 +26,18 @@ cargo run -- --config config/gateway.toml
 `forwarding.allowed_targets` must be non-empty unless you pass
 `--allow-any-target` (development only; logs a startup warning).
 
+Both flags can also be set from the environment:
+`OBLIVIOUS_GATEWAY_CONFIG=<path>` and
+`OBLIVIOUS_GATEWAY_ALLOW_ANY_TARGET=true`. A command-line flag takes
+precedence over its environment variable.
+
 ## Endpoints
 
-| Path (configurable) | Method | Behavior |
+| Path | Method | Behavior |
 |---|---|---|
 | `/gateway` | `POST` | Decrypt → forward → re-encrypt. Requires `Content-Type: message/ohttp-req`. |
 | `/ohttp-keys` | any | `application/ohttp-keys` list of advertised key configs. |
-| `/health` | any | Liveness only; does not poll backends. |
+| `/health` | `GET` | Liveness only; does not poll backends. |
 | `/metrics` (separate listener) | `GET` | Prometheus scrape endpoint. |
 
 Unknown routes → 404. Pre-decryption failures are plaintext outer 400s
@@ -44,7 +49,7 @@ response with the outer status held at 200.
 ## Configuration
 
 See [`config/gateway.example.toml`](config/gateway.example.toml) for a
-fully commented example: `[server]` (listen address, paths, optional
+fully commented example: `[server]` (listen address, optional
 `[server.tls]` for HTTPS), `[metrics]` (optional), `[forwarding]`
 (`allowed_targets`, optional `rewrites`), and one or more `[[generations]]`.
 
@@ -131,7 +136,9 @@ action (same pattern as `world-chain-rundler`).
 - **Outbound timeouts**: hardcoded 10s connect / 30s request timeout
   (`src/forward.rs`) — a deliberate departure from "use library defaults"
   to avoid unbounded resource exhaustion. Not yet operator-configurable.
-  Inbound listener still has none.
+  Inbound, a client gets 30s to send the Encapsulated Request body
+  (`src/gateway.rs`); other inbound timeouts are the server library's
+  defaults.
 - **Redirects trusted**: allowlist checked only on the initial
   destination (deliberate — see `GLOSSARY.md`); an allowed target can
   redirect anywhere, including internal addresses.

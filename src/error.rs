@@ -113,21 +113,3 @@ impl PayloadError {
         }
     }
 }
-
-/// Startup-time configuration or key-material errors. These abort the
-/// process before it starts serving traffic.
-#[derive(Debug, Error)]
-pub enum StartupError {
-    /// The TOML configuration file failed to parse or validate.
-    #[error("configuration error: {0}")]
-    Config(String),
-    /// A seed or derived key was missing, unreadable, or invalid.
-    #[error("key material error: {0}")]
-    Key(String),
-    /// A `[server.tls]` certificate or key file was missing or invalid.
-    #[error("TLS configuration error: {0}")]
-    Tls(String),
-    /// Reading the configuration file itself failed.
-    #[error("io error: {0}")]
-    Io(#[from] std::io::Error),
-}

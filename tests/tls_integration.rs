@@ -91,15 +91,7 @@ async fn start_gateway_tls(tls_config: &TlsConfig) -> SocketAddr {
         key_ring,
         forwarder,
     });
-    let server_config = oblivious_gateway::config::ServerConfig {
-        listen_addr: "127.0.0.1:0".to_string(),
-        gateway_path: "/gateway".to_string(),
-        keys_path: "/ohttp-keys".to_string(),
-        health_path: "/health".to_string(),
-        shutdown_grace_seconds: 1,
-        tls: None,
-    };
-    let app = oblivious_gateway::build_router(state, &server_config);
+    let app = oblivious_gateway::build_router(state);
 
     let handle = axum_server::Handle::new();
     let bind_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();

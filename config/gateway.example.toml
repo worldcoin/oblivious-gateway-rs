@@ -7,9 +7,6 @@
 
 [server]
 listen_addr = "0.0.0.0:8080"
-gateway_path = "/gateway"
-keys_path = "/ohttp-keys"
-health_path = "/health"
 shutdown_grace_seconds = 30
 
 # Optional incoming TLS. Omit this section to serve plaintext HTTP, e.g.
@@ -18,11 +15,10 @@ shutdown_grace_seconds = 30
 # cert_file = "/etc/oblivious-gateway/tls/cert.pem"
 # key_file = "/etc/oblivious-gateway/tls/key.pem"
 
-# Prometheus metrics are served on their own listener. Omit this section to
-# disable metrics entirely.
+# Prometheus metrics are served at /metrics on their own listener. Omit this
+# section to disable metrics entirely.
 [metrics]
 listen_addr = "127.0.0.1:9090"
-path = "/metrics"
 
 [forwarding]
 # Exact host[:port] allowlist matched against the inner request's Host.

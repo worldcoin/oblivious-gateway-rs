@@ -1,7 +1,7 @@
 //! The `/gateway`, `/ohttp-keys` and `/health` HTTP handlers.
 
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use axum::body::to_bytes;
 use axum::extract::{Request, State};
@@ -29,6 +29,11 @@ const OHTTP_RESPONSE_CONTENT_TYPE: &str = "message/ohttp-res";
 /// Matches axum's own default `Bytes` extractor limit (documented in
 /// README.md's "Known limitations"): 2 MiB.
 const MAX_ENCAPSULATED_REQUEST_BYTES: usize = 2 * 1024 * 1024;
+
+/// Upper bound on reading the Encapsulated Request body, so a client that
+/// trickles its body cannot hold a request open indefinitely. Matches the
+/// outbound request timeout in `forward.rs`.
+const ENCAPSULATED_REQUEST_READ_TIMEOUT: Duration = Duration::from_secs(30);
 
 fn is_ohttp_request_content_type(value: Option<&str>) -> bool {
     value.is_some_and(|value| value.eq_ignore_ascii_case(OHTTP_REQUEST_CONTENT_TYPE))
@@ -82,7 +87,12 @@ pub async fn gateway_handler(State(state): State<Arc<AppState>>, request: Reques
         return outer_error(&mut metrics, OuterError::InvalidContentType);
     }
 
-    let Ok(encapsulated_request) = to_bytes(body, MAX_ENCAPSULATED_REQUEST_BYTES).await else {
+    let Ok(Ok(encapsulated_request)) = tokio::time::timeout(
+        ENCAPSULATED_REQUEST_READ_TIMEOUT,
+        to_bytes(body, MAX_ENCAPSULATED_REQUEST_BYTES),
+    )
+    .await
+    else {
         return outer_error(&mut metrics, OuterError::InvalidContent);
     };
 
@@ -119,10 +129,7 @@ pub async fn gateway_handler(State(state): State<Arc<AppState>>, request: Reques
     metrics.set_outer_status(200);
     (
         StatusCode::OK,
-        [
-            (header::CONTENT_TYPE, OHTTP_RESPONSE_CONTENT_TYPE),
-            (header::CONNECTION, "keep-alive"),
-        ],
+        [(header::CONTENT_TYPE, OHTTP_RESPONSE_CONTENT_TYPE)],
         encapsulated_response,
     )
         .into_response()

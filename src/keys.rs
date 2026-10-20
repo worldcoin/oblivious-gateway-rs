@@ -14,7 +14,7 @@ use ohttp::hpke::{Aead, Kdf, Kem};
 use ohttp::{KeyConfig, KeyId, Server, SymmetricSuite};
 
 use crate::config::{GenerationConfig, MIN_SEED_LEN};
-use crate::error::StartupError;
+use eyre::{WrapErr, bail};
 
 fn symmetric_suites() -> Vec<SymmetricSuite> {
     vec![SymmetricSuite::new(Kdf::HkdfSha256, Aead::Aes128Gcm)]
@@ -51,21 +51,21 @@ impl Generation {
     ///
     /// # Errors
     ///
-    /// Returns [`StartupError::Key`] if the seed can't be resolved, is
-    /// shorter than [`MIN_SEED_LEN`], or either key fails to derive.
-    fn from_config(cfg: &GenerationConfig) -> Result<Self, StartupError> {
+    /// Fails if the seed can't be resolved, is shorter than
+    /// [`MIN_SEED_LEN`], or either key fails to derive.
+    fn from_config(cfg: &GenerationConfig) -> eyre::Result<Self> {
         let x25519_key_id = cfg.x25519_key_id();
         let xwing_key_id = cfg.xwing_key_id();
 
         let seed = cfg
             .seed
             .resolve()
-            .map_err(|e| StartupError::Key(format!("generation {x25519_key_id}: {e}")))?;
+            .wrap_err_with(|| format!("loading seed for generation {x25519_key_id}"))?;
         if seed.len() < MIN_SEED_LEN {
-            return Err(StartupError::Key(format!(
+            bail!(
                 "generation {x25519_key_id} seed is {} bytes, need at least {MIN_SEED_LEN}",
                 seed.len()
-            )));
+            );
         }
 
         let x25519_seed = x25519_seed_transform(&seed);
@@ -75,10 +75,10 @@ impl Generation {
             symmetric_suites(),
             &x25519_seed,
         )
-        .map_err(|e| StartupError::Key(format!("deriving X25519 key: {e:?}")))?;
+        .wrap_err("deriving X25519 key")?;
 
         let xwing_config = KeyConfig::derive(xwing_key_id, Kem::XWing, symmetric_suites(), &seed)
-            .map_err(|e| StartupError::Key(format!("deriving X-Wing key: {e:?}")))?;
+            .wrap_err("deriving X-Wing key")?;
 
         Ok(Self {
             x25519_key_id,
@@ -114,10 +114,9 @@ impl KeyRing {
     ///
     /// # Errors
     ///
-    /// Returns [`StartupError::Key`] if any generation's seed or key
-    /// derivation fails, or if encoding the advertised configuration list
-    /// fails.
-    pub fn load(generations: &[GenerationConfig]) -> Result<Self, StartupError> {
+    /// Fails if any generation's seed or key derivation fails, or if
+    /// encoding the advertised configuration list fails.
+    pub fn load(generations: &[GenerationConfig]) -> eyre::Result<Self> {
         let mut keys = Vec::new();
         // Publish in configuration order, X25519 then X-Wing per generation,
         // so operators control preference by ordering generations with
@@ -134,7 +133,7 @@ impl KeyRing {
                 advertise: generation.advertise,
                 server: Arc::new(
                     Server::new(generation.x25519_config.clone())
-                        .map_err(|e| StartupError::Key(format!("X25519 server: {e:?}")))?,
+                        .wrap_err("creating X25519 server")?,
                 ),
             });
             keys.push(LoadedKey {
@@ -143,7 +142,7 @@ impl KeyRing {
                 advertise: generation.advertise,
                 server: Arc::new(
                     Server::new(generation.xwing_config.clone())
-                        .map_err(|e| StartupError::Key(format!("X-Wing server: {e:?}")))?,
+                        .wrap_err("creating X-Wing server")?,
                 ),
             });
 
@@ -153,8 +152,8 @@ impl KeyRing {
             }
         }
 
-        let advertised_configs = KeyConfig::encode_list(&advertise_list)
-            .map_err(|e| StartupError::Key(format!("encoding advertised configs: {e:?}")))?;
+        let advertised_configs =
+            KeyConfig::encode_list(&advertise_list).wrap_err("encoding advertised configs")?;
 
         Ok(Self {
             keys,
