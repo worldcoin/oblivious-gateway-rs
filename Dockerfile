@@ -23,5 +23,7 @@ FROM gcr.io/distroless/cc-debian12:nonroot@sha256:9dac0a79194e45a7da0158a9c6da57
 COPY --from=builder /build/target/release/oblivious-gateway /usr/local/bin/oblivious-gateway
 
 EXPOSE 8080
+# Default config path via env rather than CMD, so it can be overridden with
+# -e and extra flags passed to `docker run` don't drop it.
+ENV OBLIVIOUS_GATEWAY_CONFIG=/etc/oblivious-gateway/gateway.toml
 ENTRYPOINT ["/usr/local/bin/oblivious-gateway"]
-CMD ["--config", "/etc/oblivious-gateway/gateway.toml"]

@@ -75,15 +75,7 @@ fn build_app_with_forwarding(key_ring: KeyRing, forwarding: ForwardingConfig) ->
         key_ring,
         forwarder,
     });
-    let server_config = oblivious_gateway::config::ServerConfig {
-        listen_addr: "127.0.0.1:0".to_string(),
-        gateway_path: "/gateway".to_string(),
-        keys_path: "/ohttp-keys".to_string(),
-        health_path: "/health".to_string(),
-        shutdown_grace_seconds: 1,
-        tls: None,
-    };
-    oblivious_gateway::build_router(state, &server_config)
+    oblivious_gateway::build_router(state)
 }
 
 fn build_app_with(key_ring: KeyRing, allowed_targets: Vec<String>) -> axum::Router {
@@ -393,6 +385,7 @@ async fn keys_endpoint_returns_advertised_configs() {
 async fn health_endpoint_is_unconditionally_ok() {
     let app = build_app(vec!["example.invalid".to_string()]);
     let response = app
+        .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
@@ -403,6 +396,18 @@ async fn health_endpoint_is_unconditionally_ok() {
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/health")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED);
 }
 
 #[tokio::test]
@@ -777,4 +782,30 @@ async fn expect_100_continue_is_rejected_without_sending_the_interim_response() 
         !response.contains("100 Continue"),
         "must never send the 100-continue interim response:\n{response}"
     );
+}
+
+/// A client that sends the right content type and then never finishes its
+/// body must get an outer 400 once the read deadline passes, rather than
+/// holding the request open indefinitely.
+#[tokio::test(start_paused = true)]
+async fn stalled_request_body_times_out() {
+    let app = build_app(vec!["example.invalid".to_string()]);
+    let never_finishes =
+        futures_util::stream::pending::<Result<axum::body::Bytes, std::io::Error>>();
+
+    let response = tokio::time::timeout(
+        std::time::Duration::from_secs(120),
+        app.oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/gateway")
+                .header("content-type", "message/ohttp-req")
+                .body(Body::from_stream(never_finishes))
+                .unwrap(),
+        ),
+    )
+    .await
+    .expect("gateway must stop waiting for a stalled body")
+    .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }

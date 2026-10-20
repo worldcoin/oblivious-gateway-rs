@@ -56,8 +56,9 @@ pub struct BinaryHttpRequest {
     /// Request path, including any query string.
     pub path: String,
     /// Request headers, with hop-by-hop headers and any client-supplied
-    /// `Host` header already stripped (the outbound request always gets
-    /// its `Host` from the resolved target, never from the client).
+    /// `Host` and `Content-Length` headers already stripped (the outbound
+    /// request always gets its `Host` from the resolved target and its
+    /// length from `body`, never from the client).
     pub headers: HeaderMap,
     /// Request body.
     pub body: Vec<u8>,
@@ -81,17 +82,18 @@ pub fn decode_request(bytes: &[u8]) -> Result<BinaryHttpRequest, PayloadError> {
 
     let method_bytes = control.method().ok_or(PayloadError::Malformed)?;
     let method = Method::from_bytes(method_bytes).map_err(|_| PayloadError::Malformed)?;
-    let scheme = control
-        .scheme()
-        .map(|s| String::from_utf8_lossy(s).into_owned())
-        .unwrap_or_default();
+    let utf8 =
+        |bytes: &[u8]| String::from_utf8(bytes.to_vec()).map_err(|_| PayloadError::Malformed);
+    let scheme = control.scheme().map(utf8).transpose()?.unwrap_or_default();
     let authority = control
         .authority()
         .filter(|a| !a.is_empty())
-        .map(|a| String::from_utf8_lossy(a).into_owned());
+        .map(utf8)
+        .transpose()?;
     let path = control
         .path()
-        .map(|p| String::from_utf8_lossy(p).into_owned())
+        .map(utf8)
+        .transpose()?
         .unwrap_or_else(|| "/".to_string());
 
     let connection_nominated = connection_nominated_headers(
@@ -133,6 +135,12 @@ pub fn decode_request(bytes: &[u8]) -> Result<BinaryHttpRequest, PayloadError> {
         // below, not appended to `headers`.
         if name == reqwest::header::HOST {
             host_header_values.push(value);
+            continue;
+        }
+        // The outbound body is `message.content()`, so the HTTP client
+        // derives the framing from it; a client-supplied length could
+        // disagree with those bytes.
+        if name == reqwest::header::CONTENT_LENGTH {
             continue;
         }
         headers.append(name, value);
@@ -217,8 +225,55 @@ pub fn encode_error_response(status: u16, message: &str) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::{decode_request, encode_response};
+    use crate::error::PayloadError;
     use bhttp::{Message, Mode};
     use reqwest::header::{HeaderMap, HeaderValue};
+
+    fn encode(request: &Message) -> Vec<u8> {
+        let mut encoded = Vec::new();
+        request
+            .write_bhttp(Mode::KnownLength, &mut encoded)
+            .unwrap();
+        encoded
+    }
+
+    #[test]
+    fn client_content_length_is_not_forwarded() {
+        let mut request = Message::request(
+            b"POST".to_vec(),
+            b"https".to_vec(),
+            b"allowed.example".to_vec(),
+            b"/".to_vec(),
+        );
+        request.put_header(b"content-length".to_vec(), b"100".to_vec());
+        request.write_content(b"hello");
+
+        let decoded = decode_request(&encode(&request)).unwrap();
+        assert!(!decoded.headers.contains_key("content-length"));
+        assert_eq!(decoded.body, b"hello");
+    }
+
+    #[test]
+    fn invalid_utf8_control_fields_are_malformed() {
+        let valid = [
+            b"https".to_vec(),
+            b"allowed.example".to_vec(),
+            b"/".to_vec(),
+        ];
+        for field in 0..valid.len() {
+            let mut parts = valid.clone();
+            parts[field] = b"/\xff".to_vec();
+            let [scheme, authority, path] = parts;
+            let request = Message::request(b"GET".to_vec(), scheme, authority, path);
+            assert!(
+                matches!(
+                    decode_request(&encode(&request)),
+                    Err(PayloadError::Malformed)
+                ),
+                "control field {field}"
+            );
+        }
+    }
 
     #[test]
     fn connection_nominated_headers_do_not_cross_the_gateway_boundary() {

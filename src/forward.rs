@@ -5,13 +5,14 @@
 //! are followed using the HTTP client's own (finite, default) redirect
 //! handling without re-validating each hop. Operators who allowlist a
 //! target are trusting it to choose subsequent destinations, including
-//! internal ones — see GLOSSARY.md's "Where we knowingly diverge" section.
+//! internal ones — see GLOSSARY.md's "Where we differ from the Go reference"
+//! section.
 
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use axum::http::uri::{Authority, PathAndQuery};
-use reqwest::{Client, Method, Url};
+use reqwest::{Client, Url};
 
 use crate::bhttp::BinaryHttpRequest;
 use crate::config::{ForwardingConfig, RewriteTarget};
@@ -119,12 +120,10 @@ impl Forwarder {
         };
 
         let url = target_url(&scheme, &host, &request.path)?;
-        let method = Method::from_bytes(request.method.as_str().as_bytes())
-            .map_err(|_| PayloadError::Malformed)?;
 
         let outbound_request = self
             .client
-            .request(method, url)
+            .request(request.method.clone(), url)
             .headers(request.headers.clone())
             .body(request.body.clone());
 
@@ -146,7 +145,7 @@ impl Forwarder {
     /// # Errors
     ///
     /// Returns [`PayloadError::Forbidden`] if the target isn't allowlisted,
-    /// [`PayloadError::Malformed`] if its method or target components are invalid, or
+    /// [`PayloadError::Malformed`] if its target components are invalid, or
     /// [`PayloadError::TargetFailed`] if the request couldn't be sent or
     /// its response couldn't be read.
     pub async fn forward(

@@ -6,48 +6,67 @@
 //! headers, bodies, seeds or client identifiers are recorded.
 
 use std::net::SocketAddr;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use axum::Router;
 use axum::extract::State;
 use axum::routing::get;
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 
-use crate::error::StartupError;
+use eyre::WrapErr;
+
+/// Pause before rebinding a stopped metrics listener, so a persistent
+/// failure doesn't spin.
+const METRICS_RESTART_DELAY: Duration = Duration::from_secs(1);
 
 async fn render(State(handle): State<PrometheusHandle>) -> String {
     handle.render()
 }
 
-/// Install the global Prometheus recorder and serve it on its own listener
-/// and path. Must be called from within a Tokio runtime; the listener
+/// Install the global Prometheus recorder and serve it at `/metrics` on its
+/// own listener. Must be called from within a Tokio runtime; the listener
 /// itself is spawned as a background task and outlives this function.
 ///
 /// # Errors
 ///
-/// Returns [`StartupError::Config`] if `listen_addr` doesn't parse as a
-/// socket address, or if installing the global Prometheus recorder fails
-/// (e.g. one is already installed). Returns [`StartupError::Io`] if the
-/// listener cannot bind; the recorder is not installed in that case.
-pub async fn install(listen_addr: &str, path: &str) -> Result<(), StartupError> {
+/// Fails if `listen_addr` doesn't parse as a socket address, if the
+/// listener cannot bind (the recorder is not installed in that case), or if
+/// installing the global Prometheus recorder fails (e.g. one is already
+/// installed).
+pub async fn install(listen_addr: &str) -> eyre::Result<()> {
     let addr: SocketAddr = listen_addr
         .parse()
-        .map_err(|e| StartupError::Config(format!("invalid metrics listen_addr: {e}")))?;
+        .wrap_err_with(|| format!("invalid metrics listen_addr {listen_addr:?}"))?;
 
-    let listener = tokio::net::TcpListener::bind(addr).await?;
+    let mut listener = tokio::net::TcpListener::bind(addr)
+        .await
+        .wrap_err_with(|| format!("binding metrics listener on {addr}"))?;
 
     let handle = PrometheusBuilder::new()
         .set_buckets(&[
             0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0,
         ])
-        .map_err(|e| StartupError::Config(format!("configuring histogram buckets: {e}")))?
+        .wrap_err("configuring histogram buckets")?
         .install_recorder()
-        .map_err(|e| StartupError::Config(format!("installing Prometheus recorder: {e}")))?;
+        .wrap_err("installing Prometheus recorder")?;
 
-    let app = Router::new().route(path, get(render)).with_state(handle);
+    let app = Router::new()
+        .route("/metrics", get(render))
+        .with_state(handle);
+    // `axum::serve` (0.7) retries accept errors internally and does not
+    // return in practice; if it ever does, rebind and keep serving rather
+    // than leave the gateway running without metrics.
     tokio::spawn(async move {
-        if let Err(err) = axum::serve(listener, app).await {
-            tracing::error!(error = %err, "metrics listener stopped");
+        loop {
+            let result = axum::serve(listener, app.clone()).await;
+            tracing::error!(?result, "metrics listener stopped; restarting");
+            listener = loop {
+                tokio::time::sleep(METRICS_RESTART_DELAY).await;
+                match tokio::net::TcpListener::bind(addr).await {
+                    Ok(listener) => break listener,
+                    Err(err) => tracing::error!(error = %err, "rebinding metrics listener failed"),
+                }
+            };
         }
     });
 

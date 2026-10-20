@@ -1,22 +1,16 @@
 use std::net::{SocketAddr, TcpListener};
-use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
 struct GatewayProcess {
     child: Child,
-    directory: PathBuf,
+    _directory: tempfile::TempDir,
 }
 
 impl GatewayProcess {
     fn start(metrics_addr: SocketAddr) -> Self {
-        let directory = std::env::temp_dir().join(format!(
-            "oblivious-gateway-startup-{}-{}",
-            std::process::id(),
-            metrics_addr.port()
-        ));
-        std::fs::create_dir(&directory).unwrap();
-        let config = directory.join("gateway.toml");
+        let directory = tempfile::tempdir().unwrap();
+        let config = directory.path().join("gateway.toml");
         std::fs::write(
             &config,
             format!(
@@ -49,7 +43,10 @@ seed = {{ hex = "{}" }}
             .stderr(Stdio::null())
             .spawn()
             .unwrap();
-        Self { child, directory }
+        Self {
+            child,
+            _directory: directory,
+        }
     }
 }
 
@@ -57,8 +54,6 @@ impl Drop for GatewayProcess {
     fn drop(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
-        let _ = std::fs::remove_file(self.directory.join("gateway.toml"));
-        let _ = std::fs::remove_dir(&self.directory);
     }
 }
 
