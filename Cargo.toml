@@ -1,0 +1,43 @@
+[package]
+name = "oblivious-gateway"
+version = "0.1.0"
+edition = "2024"
+license = "BSD-3-Clause"
+description = "Standalone Rust Oblivious HTTP (RFC 9458) gateway"
+
+[lib]
+name = "oblivious_gateway"
+path = "src/lib.rs"
+
+[[bin]]
+name = "oblivious-gateway"
+path = "src/main.rs"
+
+[dependencies]
+axum = "0.7"
+axum-server = { version = "0.8.0", features = ["tls-rustls"] }
+bhttp = { version = "0.5", features = ["bhttp", "read-bhttp", "write-bhttp"] }
+clap = { version = "4.6.7", features = ["derive", "env"] }
+eyre = "0.6"
+hex = "0.4.3"
+metrics = "0.24"
+metrics-exporter-prometheus = "0.16"
+ohttp = { version = "0.8", features = ["server", "rust-hpke"], default-features = false }
+rand = "0.10.3"
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls", "http2"] }
+rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs", "std", "tls12"] }
+rustls-pki-types = { version = "1", features = ["std"] }
+serde = { version = "1.0.229", features = ["derive"] }
+thiserror = "2.0.20"
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "signal", "net", "fs", "time"] }
+toml = "1.1.6"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
+
+[dev-dependencies]
+futures-util = "0.3"
+ohttp = { version = "0.8", features = ["client", "server", "rust-hpke"], default-features = false }
+tempfile = "3"
+tokio = { version = "1.53.1", features = ["full", "test-util"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["aws-lc-rs"] }
+tower = { version = "0.5", features = ["util"] }

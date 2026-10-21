@@ -1,0 +1,63 @@
+# Example oblivious-gateway-rs configuration.
+#
+# Configuration is loaded once at startup; there is no hot reload. To
+# rotate keys, add a new [[generations]] entry (with `advertise = true`)
+# while keeping the old one loaded (set `advertise = false` once clients
+# have adopted the new generation), then restart.
+
+[server]
+listen_addr = "0.0.0.0:8080"
+shutdown_grace_seconds = 30
+
+# Optional incoming TLS. Omit this section to serve plaintext HTTP, e.g.
+# when TLS terminates at an upstream load balancer.
+# [server.tls]
+# cert_file = "/etc/oblivious-gateway/tls/cert.pem"
+# key_file = "/etc/oblivious-gateway/tls/key.pem"
+
+# Prometheus metrics are served at /metrics on their own listener. Omit this
+# section to disable metrics entirely.
+[metrics]
+listen_addr = "127.0.0.1:9090"
+
+[forwarding]
+# Exact host[:port] allowlist matched against the inner request's Host.
+# Required unless the process is started with --allow-any-target.
+allowed_targets = ["api.example.com", "internal.example.com:8443"]
+
+# Optional scheme/host rewrites applied after the allowlist check, e.g. to
+# route a public hostname to an internal service address.
+[forwarding.rewrites]
+"internal.example.com:8443" = { scheme = "https", host = "internal-service.svc.cluster.local:443" }
+
+# At least one key generation is required. Each generation is one
+# self-contained block below: its own seed plus its own two key IDs. Each
+# generation derives one X25519 key and one X-Wing key from its own master
+# seed - different generations use different, independently generated
+# seeds, never a value derived from another generation's seed. See
+# GLOSSARY.md for why the X25519 key uses a transformed copy of the seed.
+#
+# `seed` accepts inline hex (local testing only - see below), an
+# environment variable name, or a file path, e.g. `seed = { file = "/run/secrets/..." }`.
+#
+# Every generation requires an explicit `x25519.key_id`, including the first.
+# Omit `xwing` (or its `key_id`) to derive it from the X25519 key ID by
+# adding 128 (wrapping) - the same shape as Go's own legacy-configuration
+# derivation (`(configID - 128) % 255`), generalized to a per-generation
+# pair instead of one fixed pair. IDs must be unique across all loaded keys.
+# Keep IDs stable when reordering or removing generations.
+# `advertise` defaults to true; set false only for decrypt-only generations.
+[[generations]]
+x25519 = { key_id = 0 }
+# Seed material should come from an environment variable or a mounted file
+# in production; inline hex seeds are intended for local testing only.
+seed = { env = "OBLIVIOUS_GATEWAY_SEED" }
+# xwing omitted here: this generation gets key IDs 0 and 128.
+
+# Example of a second, retained-but-not-advertised generation during
+# rotation - note its own independent seed (never derived from the first
+# generation's seed above) and its own stable x25519 key ID:
+# [[generations]]
+# x25519 = { key_id = 2 }
+# advertise = false
+# seed = { file = "/run/secrets/oblivious-gateway-seed-2" }
