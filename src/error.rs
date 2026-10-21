@@ -27,12 +27,6 @@ pub enum OuterError {
     /// The outer HTTP request body was missing or unreadable.
     #[error("failed to read request body")]
     InvalidContent,
-    /// RFC 9458 §5.1: "Clients MUST NOT construct a request that
-    /// includes a 100-continue expectation; the Oblivious Gateway
-    /// Resource MUST generate an error if a 100-continue expectation is
-    /// received."
-    #[error("unsupported expectation")]
-    UnsupportedExpectation,
     /// The request's Key Identifier doesn't match any loaded key.
     #[error("unknown key configuration")]
     ConfigMismatch,
@@ -61,7 +55,6 @@ impl OuterError {
         match self {
             Self::InvalidContentType => "invalid_content_type",
             Self::InvalidContent => "invalid_content",
-            Self::UnsupportedExpectation => "unsupported_expectation",
             Self::ConfigMismatch => "config_mismatch",
             Self::DecapsulationFailed => "decapsulation_failed",
             Self::EncapsulationFailed => "encapsulation_failed",
@@ -85,7 +78,12 @@ pub enum PayloadError {
     /// The request's target Host is not in `forwarding.allowed_targets`.
     #[error("target forbidden")]
     Forbidden,
-    /// Forwarding to the target failed (connect/timeout/transport error).
+    /// The target did not respond within the outbound timeout. RFC 9458
+    /// §5.2 suggests 504 (Gateway Timeout) for this case.
+    #[error("target request timed out")]
+    TargetTimedOut,
+    /// Forwarding to the target failed (connect/transport error, or an
+    /// oversized response).
     #[error("target request failed")]
     TargetFailed,
 }
@@ -97,6 +95,7 @@ impl PayloadError {
         match self {
             Self::Malformed | Self::UnsupportedExpectation => 400,
             Self::Forbidden => 403,
+            Self::TargetTimedOut => 504,
             Self::TargetFailed => 500,
         }
     }
@@ -109,6 +108,7 @@ impl PayloadError {
             Self::Malformed => "content_decode_failed",
             Self::UnsupportedExpectation => "unsupported_expectation",
             Self::Forbidden => "request_forbidden",
+            Self::TargetTimedOut => "request_timed_out",
             Self::TargetFailed => "request_failed",
         }
     }

@@ -43,8 +43,8 @@ precedence over its environment variable.
 Unknown routes → 404. Pre-decryption failures are plaintext outer 400s
 (RFC 9458 §9.5's `ohttp-key` problem type — not the Go reference's 401 for
 an unknown key). Post-decryption failures (malformed request 400,
-forbidden target 403, upstream failure 500) are inside the encrypted
-response with the outer status held at 200.
+forbidden target 403, upstream timeout 504, other upstream failure 500)
+are inside the encrypted response with the outer status held at 200.
 
 ## Configuration
 
