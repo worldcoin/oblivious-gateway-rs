@@ -97,7 +97,7 @@ KEM, key ID, status class — never URLs/headers/bodies/seeds):
 
 Enable `RUST_LOG=info,oblivious_gateway=debug` for one `gateway request completed`
 entry per handled `/gateway` request, including rejections. Fields include
-`target`, inner `method`/`inner_status` when available, `outer_status`,
+`target_label`, inner `method`/`inner_status` when available, `outer_status`,
 `duration_ms` and `outcome`. Timing ends when the handler produces the response,
 not when the client receives it. Cancelled handlers without a response do not
 emit a completion entry. Inner status includes gateway-generated encrypted errors;
