@@ -97,25 +97,19 @@ KEM, key ID, status class — never URLs/headers/bodies/seeds):
 
 Enable `RUST_LOG=info,oblivious_gateway=debug` for one `gateway request completed`
 entry per handled `/gateway` request, including rejections. Fields include
-`target_label`, inner `method`/`inner_status` when available, `outer_status`,
+`target_host`, inner `method`/`inner_status` when available, `outer_status`,
 `duration_ms` and `outcome`. Timing ends when the handler produces the response,
 not when the client receives it. Cancelled handlers without a response do not
 emit a completion entry. Inner status includes gateway-generated encrypted errors;
 `success` means forwarding succeeded, not necessarily an inner 2xx status.
 
-Target names are opt-in and refer to the original destination, before rewrites
-or redirects:
-
-```toml
-[forwarding.target_labels]
-"indexer.example" = "indexer"
-"recovery.example" = "recovery"
-```
-
-Unmapped targets omit the field. Labels do not grant allowlist access. Use only
-non-sensitive names: logs never copy request authorities, paths, queries, headers
-or bodies. Non-standard methods are logged as `OTHER`. These fields are not added
-to metrics. Debug logging is per-request and can generate substantial volume.
+`target_host` is the matching `forwarding.allowed_targets` entry, i.e. the
+original destination before rewrites or redirects. It is omitted for requests
+whose host isn't allowlisted, and always with `--allow-any-target`, so a
+client-supplied host is never logged. Paths, queries, headers and bodies are
+never logged. Non-standard methods are logged as `OTHER`. These fields are not
+added to metrics. Debug logging is per-request and can generate substantial
+volume.
 
 ## Building, testing, Docker
 

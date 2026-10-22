@@ -40,7 +40,6 @@ async fn completion_logs_are_debug_only_and_do_not_leak_request_content() {
         key_ring,
         ForwardingConfig {
             allowed_targets: vec![authority.clone()],
-            target_labels: [(authority.clone(), "indexer".into())].into(),
             ..Default::default()
         },
     );
@@ -90,26 +89,25 @@ async fn completion_logs_are_debug_only_and_do_not_leak_request_content() {
         }
         assert_eq!(entries.len(), 3);
         for field in [
-            "\"target_label\":\"indexer\"",
-            "\"method\":\"GET\"",
-            "\"inner_status\":200",
-            "\"outer_status\":200",
-            "\"duration_ms\":",
-            "\"outcome\":\"success\"",
+            format!("\"target_host\":\"{authority}\""),
+            "\"method\":\"GET\"".to_string(),
+            "\"inner_status\":200".to_string(),
+            "\"outer_status\":200".to_string(),
+            "\"duration_ms\":".to_string(),
+            "\"outcome\":\"success\"".to_string(),
         ] {
             assert!(
-                entries[0].contains(field),
+                entries[0].contains(&field),
                 "missing {field}: {}",
                 entries[0]
             );
         }
         assert!(entries[1].contains("\"method\":\"OTHER\""));
         assert!(entries[1].contains("\"inner_status\":403"));
-        assert!(!entries[1].contains("\"target_label\":"));
+        assert!(!entries[1].contains("\"target_host\":"));
         assert!(entries[2].contains("\"outer_status\":400"));
         assert!(!entries[2].contains("\"inner_status\":"));
         for secret in [
-            &authority,
             "secret-host",
             "SECRET-METHOD",
             "secret-path",

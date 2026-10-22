@@ -154,7 +154,7 @@ async fn forward_binary_http_request(
     };
 
     metrics.set_request_context(
-        state.forwarder.target_label(&binary_request.authority),
+        state.forwarder.allowed_target(&binary_request.authority),
         binary_request.method.as_str(),
     );
     let started_at = Instant::now();
