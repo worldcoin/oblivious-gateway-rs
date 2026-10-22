@@ -731,18 +731,16 @@ async fn malformed_binary_http_request_is_encrypted_400() {
     assert_eq!(binary_status, 400);
 }
 
-/// RFC 9458 §5.1.2: "Clients MUST NOT construct a request that includes a
-/// 100-continue expectation; the Oblivious Gateway Resource MUST generate
-/// an error if a 100-continue expectation is received." This can only be
-/// verified over a real connection: axum's `oneshot` test helper calls the
-/// router as an in-process Tower service and never touches hyper's
-/// transport layer, which is what answers "100 Continue" automatically the
-/// moment a body is first polled - before application code can object.
+/// RFC 9458 §5.1 forbids 100-continue inside the encapsulated request only.
+/// An outer `Expect: 100-continue` (e.g. from a relay or curl on a large
+/// body) is ordinary HTTP and must be honored. Needs a real connection:
+/// `oneshot` bypasses hyper, which is what sends the interim response.
 #[tokio::test]
-async fn expect_100_continue_is_rejected_without_sending_the_interim_response() {
+async fn outer_expect_100_continue_is_honored() {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     let key_ring = KeyRing::load(&test_generations()).unwrap();
+    let client = ClientRequest::from_encoded_config(&key_config_for(&key_ring, 1)).unwrap();
     let app = build_app_with(key_ring, vec!["example.invalid".to_string()]);
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -751,8 +749,19 @@ async fn expect_100_continue_is_rejected_without_sending_the_interim_response() 
         axum::serve(listener, app).await.unwrap();
     });
 
+    let message = bhttp::Message::request(
+        b"GET".to_vec(),
+        b"https".to_vec(),
+        b"not-allowed.example".to_vec(),
+        b"/".to_vec(),
+    );
+    let mut encoded = Vec::new();
+    message
+        .write_bhttp(bhttp::Mode::KnownLength, &mut encoded)
+        .unwrap();
+    let (body, context) = client.encapsulate(&encoded).unwrap();
+
     let mut stream = tokio::net::TcpStream::connect(addr).await.unwrap();
-    let body = b"not real ohttp bytes but long enough to matter";
     let request = format!(
         "POST /gateway HTTP/1.1\r\n\
          Host: {addr}\r\n\
@@ -764,21 +773,25 @@ async fn expect_100_continue_is_rejected_without_sending_the_interim_response() 
         body.len()
     );
     stream.write_all(request.as_bytes()).await.unwrap();
-    // Deliberately do NOT write the body: a compliant rejection must not
-    // require it, since the point is to reject before reading further.
+
+    // A compliant client waits for the interim response before sending.
+    let interim = b"HTTP/1.1 100 Continue\r\n\r\n";
+    let mut received = vec![0; interim.len()];
+    stream.read_exact(&mut received).await.unwrap();
+    assert_eq!(received, interim);
+    stream.write_all(&body).await.unwrap();
 
     let mut response = Vec::new();
     stream.read_to_end(&mut response).await.unwrap();
-    let response = String::from_utf8_lossy(&response);
-
-    assert!(
-        response.starts_with("HTTP/1.1 400"),
-        "expected an immediate 400 with no interim response, got:\n{response}"
-    );
-    assert!(
-        !response.contains("100 Continue"),
-        "must never send the 100-continue interim response:\n{response}"
-    );
+    let split = response
+        .windows(4)
+        .position(|w| w == b"\r\n\r\n")
+        .expect("complete response head");
+    let head = String::from_utf8_lossy(&response[..split]);
+    assert!(head.starts_with("HTTP/1.1 200"), "{head}");
+    let decrypted = context.decapsulate(&response[split + 4..]).unwrap();
+    let (inner_status, _) = decode_bhttp_response(&decrypted);
+    assert_eq!(inner_status, 403);
 }
 
 /// A client that sends the right content type and then never finishes its

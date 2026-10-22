@@ -64,21 +64,10 @@ pub async fn gateway_handler(State(state): State<Arc<AppState>>, request: Reques
     let mut metrics = RequestMetrics::start("gateway");
     let (parts, body) = request.into_parts();
 
-    // RFC 9458 §5.1: "The encapsulation does not permit progressive
-    // processing of responses"; §5.1: "Clients MUST NOT construct a
-    // request that includes a 100-continue expectation; the Oblivious
-    // Gateway Resource MUST generate an error if a 100-continue
-    // expectation is received." Checked before the body is ever polled:
-    // axum's `Bytes` extractor (and hyper generally) answers a 100-continue
-    // expectation automatically and transparently the moment the body is
-    // first read, which would violate this MUST before our own code could
-    // intervene. Using the raw `Request` and deferring body extraction
-    // lets us reject the expectation (and drop the connection, since we
-    // never send the interim response or drain the body) instead.
-    if parts.headers.contains_key(header::EXPECT) {
-        return outer_error(&mut metrics, OuterError::UnsupportedExpectation);
-    }
-
+    // RFC 9458 §5.1's ban on 100-continue applies to the encapsulated
+    // request (enforced in `bhttp::decode_request`). An outer `Expect` is
+    // ordinary hop-by-hop HTTP between the relay and this gateway, so the
+    // server answers it normally when the body is read.
     let content_type = parts
         .headers
         .get(header::CONTENT_TYPE)
@@ -148,10 +137,15 @@ async fn forward_binary_http_request(
         Ok(request) => request,
         Err(err) => {
             metrics.set_outcome(err.outcome());
+            metrics.set_inner_status(err.status());
             return bhttp::encode_error_response(err.status(), &err.to_string());
         }
     };
 
+    metrics.set_request_context(
+        state.forwarder.allowed_target(&binary_request.authority),
+        binary_request.method.as_str(),
+    );
     let started_at = Instant::now();
     let result = state.forwarder.forward(&binary_request).await;
     let upstream_outcome = match &result {
@@ -164,11 +158,13 @@ async fn forward_binary_http_request(
     match result {
         Ok((status, headers, response_body)) => {
             metrics.set_outcome("success");
+            metrics.set_inner_status(status);
             crate::metrics::record_target_status(status);
             bhttp::encode_response(status, &headers, &response_body)
         }
         Err(err) => {
             metrics.set_outcome(err.outcome());
+            metrics.set_inner_status(err.status());
             bhttp::encode_error_response(err.status(), &err.to_string())
         }
     }

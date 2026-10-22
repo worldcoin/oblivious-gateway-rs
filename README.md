@@ -43,8 +43,8 @@ precedence over its environment variable.
 Unknown routes → 404. Pre-decryption failures are plaintext outer 400s
 (RFC 9458 §9.5's `ohttp-key` problem type — not the Go reference's 401 for
 an unknown key). Post-decryption failures (malformed request 400,
-forbidden target 403, upstream failure 500) are inside the encrypted
-response with the outer status held at 200.
+forbidden target 403, upstream timeout 504, other upstream failure 500)
+are inside the encrypted response with the outer status held at 200.
 
 ## Configuration
 
@@ -94,6 +94,22 @@ KEM, key ID, status class — never URLs/headers/bodies/seeds):
 `_upstream_duration_seconds`, `_target_status_total`, `_in_flight`,
 `_keys_loaded_total`, `_keys_advertised`. Structured JSON logs to stdout
 (`RUST_LOG`, default `info`).
+
+Enable `RUST_LOG=info,oblivious_gateway=debug` for one `gateway request completed`
+entry per handled `/gateway` request, including rejections. Fields include
+`target_host`, inner `method`/`inner_status` when available, `outer_status`,
+`duration_ms` and `outcome`. Timing ends when the handler produces the response,
+not when the client receives it. Cancelled handlers without a response do not
+emit a completion entry. Inner status includes gateway-generated encrypted errors;
+`success` means forwarding succeeded, not necessarily an inner 2xx status.
+
+`target_host` is the matching `forwarding.allowed_targets` entry, i.e. the
+original destination before rewrites or redirects. It is omitted for requests
+whose host isn't allowlisted, and always with `--allow-any-target`, so a
+client-supplied host is never logged. Paths, queries, headers and bodies are
+never logged. Non-standard methods are logged as `OTHER`. These fields are not
+added to metrics. Debug logging is per-request and can generate substantial
+volume.
 
 ## Building, testing, Docker
 

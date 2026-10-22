@@ -93,6 +93,16 @@ impl Forwarder {
         }
     }
 
+    /// The configured `allowed_targets` entry matching `authority`, if any.
+    /// Safe to log: it is operator configuration, not client-supplied
+    /// text. Always `None` with `--allow-any-target`.
+    pub fn allowed_target(&self, authority: &str) -> Option<&str> {
+        self.allowed_targets
+            .as_ref()?
+            .get(authority)
+            .map(String::as_str)
+    }
+
     async fn send(&self, request: &BinaryHttpRequest) -> Result<reqwest::Response, PayloadError> {
         if let Some(allowed) = &self.allowed_targets
             && !allowed.contains(&request.authority)
@@ -128,7 +138,11 @@ impl Forwarder {
                 is_request = err.is_request(),
                 "target request failed"
             );
-            PayloadError::TargetFailed
+            if err.is_timeout() {
+                PayloadError::TargetTimedOut
+            } else {
+                PayloadError::TargetFailed
+            }
         })
     }
 
@@ -138,9 +152,10 @@ impl Forwarder {
     /// # Errors
     ///
     /// Returns [`PayloadError::Forbidden`] if the target isn't allowlisted,
-    /// [`PayloadError::Malformed`] if its target components are invalid, or
-    /// [`PayloadError::TargetFailed`] if the request couldn't be sent or
-    /// its response couldn't be read.
+    /// [`PayloadError::Malformed`] if its target components are invalid,
+    /// [`PayloadError::TargetTimedOut`] if the target didn't respond in
+    /// time, or [`PayloadError::TargetFailed`] if the request couldn't be
+    /// sent or its response couldn't be read.
     pub async fn forward(
         &self,
         request: &BinaryHttpRequest,
@@ -164,7 +179,11 @@ impl Forwarder {
                 is_decode = err.is_decode(),
                 "reading target response body failed"
             );
-            PayloadError::TargetFailed
+            if err.is_timeout() {
+                PayloadError::TargetTimedOut
+            } else {
+                PayloadError::TargetFailed
+            }
         })? {
             if chunk.len() > MAX_TARGET_RESPONSE_BYTES.saturating_sub(body.len()) {
                 tracing::warn!("target response body exceeds limit");
@@ -262,5 +281,37 @@ mod tests {
             Err(PayloadError::TargetFailed)
         ));
         target.await.unwrap();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn silent_target_is_reported_as_gateway_timeout() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let authority = listener.local_addr().unwrap().to_string();
+        // Accept the connection and hold it open without ever responding.
+        let target = tokio::spawn(async move {
+            let (connection, _) = listener.accept().await.unwrap();
+            std::future::pending::<()>().await;
+            drop(connection);
+        });
+        let forwarder = Forwarder::new(
+            &ForwardingConfig {
+                allowed_targets: vec![authority.clone()],
+                rewrites: Default::default(),
+            },
+            false,
+        );
+        let request = BinaryHttpRequest {
+            method: reqwest::Method::GET,
+            scheme: "http".to_string(),
+            authority,
+            path: "/".to_string(),
+            headers: Default::default(),
+            body: Vec::new(),
+        };
+
+        let err = forwarder.forward(&request).await.unwrap_err();
+        assert!(matches!(err, PayloadError::TargetTimedOut), "{err:?}");
+        assert_eq!(err.status(), 504);
+        target.abort();
     }
 }

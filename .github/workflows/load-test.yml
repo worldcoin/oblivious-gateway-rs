@@ -1,0 +1,163 @@
+name: Gateway load test
+
+on:
+  workflow_dispatch:
+    inputs:
+      duration:
+        description: Duration per rate (baseline and gateway measured separately)
+        default: 30s
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  load:
+    name: Load (${{ matrix.kem }})
+    strategy:
+      fail-fast: false
+      matrix:
+        kem: [x25519, xwing]
+    runs-on:
+      group: arc-public-4xlarge-amd64-runner
+    timeout-minutes: 30
+    env:
+      PROBE_IMAGE: ghcr.io/worldcoin/ohttp-tools/ohttp-probe:latest
+      KEM: ${{ matrix.kem }}
+      DURATION: ${{ inputs.duration }}
+      RATES: '1 10 100 1000 10000'
+      TARGET_URL: http://127.0.0.1:18080/
+      GATEWAY_URL: http://127.0.0.1:18081
+      METRICS_URL: http://127.0.0.1:19090/metrics
+    services:
+      target:
+        image: nginx:alpine
+        ports:
+          - 18080:80
+        options: --log-driver none
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
+        with:
+          toolchain: stable
+      - name: Build
+        run: |
+          sudo apt-get update && sudo apt-get install -y cmake clang
+          cargo build --release --locked
+      - name: Download load tools
+        run: |
+          docker pull "$PROBE_IMAGE"
+          cd "$RUNNER_TEMP"
+          release=https://github.com/tsenart/vegeta/releases/download/v12.13.0
+          curl -fsSLO "$release/vegeta_12.13.0_linux_amd64.tar.gz"
+          curl -fsSLO "$release/vegeta_12.13.0_checksums.txt"
+          grep 'vegeta_12.13.0_linux_amd64.tar.gz$' vegeta_12.13.0_checksums.txt | sha256sum --check --strict
+          tar -xzf vegeta_12.13.0_linux_amd64.tar.gz vegeta
+      - name: Record test environment
+        run: |
+          mkdir -p load-results
+          {
+            git rev-parse HEAD
+            rustc --version
+            docker image inspect "$PROBE_IMAGE" --format '{{json .RepoDigests}}'
+            lscpu
+          } > load-results/environment.txt
+
+      - name: Start gateway
+        run: |
+          cat > "$RUNNER_TEMP/gateway.toml" <<'TOML'
+          [server]
+          listen_addr = "127.0.0.1:18081"
+          [metrics]
+          listen_addr = "127.0.0.1:19090"
+          [forwarding]
+          allowed_targets = ["127.0.0.1:18080"]
+          [[generations]]
+          x25519 = { key_id = 0 }
+          seed = { hex = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f" }
+          TOML
+          nohup target/release/oblivious-gateway \
+            --config "$RUNNER_TEMP/gateway.toml" \
+            > load-results/gateway.log 2>&1 < /dev/null &
+          echo "GATEWAY_PID=$!" >> "$GITHUB_ENV"
+
+      - name: Wait for gateway and target
+        run: |
+          for url in "$TARGET_URL" "$GATEWAY_URL/health" "$METRICS_URL"; do
+            curl --fail --silent --show-error \
+              --retry 20 --retry-connrefused --retry-delay 1 --max-time 5 \
+              "$url" > /dev/null
+          done
+
+      - name: Measure target baseline
+        run: |
+          for rate in $RATES; do
+            echo "GET $TARGET_URL" | "$RUNNER_TEMP/vegeta" attack \
+              -rate "$rate/s" -duration "$DURATION" \
+              > "load-results/target-$rate.bin"
+            "$RUNNER_TEMP/vegeta" report "load-results/target-$rate.bin" \
+              > "load-results/target-$rate.txt"
+          done
+
+      - name: Warm up gateway
+        run: |
+          docker run --rm --network host "$PROBE_IMAGE" load \
+            -kem "$KEM" \
+            -relay-url "$GATEWAY_URL/gateway" \
+            -keys-url "$GATEWAY_URL/ohttp-keys" \
+            -target-url "$TARGET_URL" \
+            -qps 100 -duration 3s -t 35s \
+            > load-results/warmup.log 2>&1
+
+      - name: Measure gateway at each request rate
+        run: |
+          failed=0
+          for rate in $RATES; do
+            curl -fsS "$METRICS_URL" > "load-results/gateway-$rate-before.prom"
+            if ! docker run --rm --network host "$PROBE_IMAGE" load \
+              -kem "$KEM" \
+              -relay-url "$GATEWAY_URL/gateway" \
+              -keys-url "$GATEWAY_URL/ohttp-keys" \
+              -target-url "$TARGET_URL" \
+              -qps "$rate" -duration "$DURATION" -t 35s \
+              > "load-results/ohttp-$rate.log" 2>&1; then
+              echo "::error::$KEM failed at $rate RPS; see the load results"
+              failed=1
+            fi
+            curl -fsS "$METRICS_URL" > "load-results/gateway-$rate-after.prom"
+          done
+          exit "$failed"
+
+      - name: Summarize results
+        if: always()
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'SUMMARY'
+          All processes share the runner. Compare achieved rate with offered rate.
+          Probe latency includes client crypto and target time.
+          Gateway timing histograms are included in the artifacts.
+          SUMMARY
+          for result in load-results/target-*.txt load-results/ohttp-*.log; do
+            test -f "$result" || continue
+            {
+              echo "### $KEM — $(basename "$result")"
+              echo '~~~text'
+              cat "$result"
+              echo '~~~'
+            } >> "$GITHUB_STEP_SUMMARY"
+          done
+
+      - name: Stop gateway
+        if: always()
+        run: |
+          if [ -n "${GATEWAY_PID:-}" ]; then
+            kill "$GATEWAY_PID" 2>/dev/null || true
+          fi
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: gateway-load-results-${{ matrix.kem }}
+          path: load-results/
