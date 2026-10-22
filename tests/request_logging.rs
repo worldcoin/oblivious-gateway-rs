@@ -49,7 +49,6 @@ async fn completion_logs_are_debug_only_and_do_not_leak_request_content() {
         let writer = buffer.clone();
         let subscriber = tracing_subscriber::fmt()
             .json()
-            .with_target(false)
             .with_max_level(level)
             .with_writer(move || writer.clone())
             .finish();
@@ -91,7 +90,7 @@ async fn completion_logs_are_debug_only_and_do_not_leak_request_content() {
         }
         assert_eq!(entries.len(), 3);
         for field in [
-            "\"target\":\"indexer\"",
+            "\"target_label\":\"indexer\"",
             "\"method\":\"GET\"",
             "\"inner_status\":200",
             "\"outer_status\":200",
@@ -106,7 +105,7 @@ async fn completion_logs_are_debug_only_and_do_not_leak_request_content() {
         }
         assert!(entries[1].contains("\"method\":\"OTHER\""));
         assert!(entries[1].contains("\"inner_status\":403"));
-        assert!(!entries[1].contains("\"target\":"));
+        assert!(!entries[1].contains("\"target_label\":"));
         assert!(entries[2].contains("\"outer_status\":400"));
         assert!(!entries[2].contains("\"inner_status\":"));
         for secret in [
