@@ -43,20 +43,26 @@ Not in RFC 9458:
 
 ## Where we differ from the Go reference
 
-None of these depart from RFC 9458. Each is either a choice the RFC leaves
-open or, for the unknown-key status, a place where we follow the RFC and
-the Go reference does not.
+These comparisons refer to Cloudflare's `privacy-gateway-server-go` at
+[revision d63adf6](https://github.com/cloudflare/privacy-gateway-server-go/tree/d63adf6f333cb2c78fad41dff5b117c7c284645e).
+Key derivation and key-ID conventions are implementation choices, not
+requirements of RFC 9458. Do not infer full configuration or wire-behavior
+parity from the shared protocol.
 
 - **Unknown key ID → HTTP 400**, not the Go reference's 401. RFC 9458
   §9.5 registers the `ohttp-key` problem type with "Recommended HTTP
   Status Code: 400", and its own example (§5.3, Figure 7) is a literal
   `400 Bad Request`.
 - **X25519 derivation uses the master seed with its final byte XORed
-  `0xff`**; X-Wing uses the seed unmodified. Not an RFC requirement — it
-  reproduces the Go reference's legacy derivation input byte-for-byte
-  (verified against a fixture captured from the vendored Go module), so
-  an operator reusing a seed keeps the same public key for clients that
-  embed or cache it.
+  `0xff`.** This reproduces the Go reference's legacy X25519 derivation
+  input byte-for-byte, verified against a fixture captured from the Go
+  module. Existing encoded client configs also require the same key ID
+  and cipher suite; preserving the seed alone is not sufficient.
+- **X-Wing uses the unmodified seed here.** The Go revision above flips
+  the last two seed bytes before deriving X-Wing. The same master seed
+  therefore does not produce interchangeable X-Wing keys. Both servers
+  support X-Wing, but this gateway does not support Go's additional
+  X25519+Kyber768Draft00 KEM.
 - **The allowlist is checked once, against the initial target only.**
   Redirects are followed via the HTTP client's own default policy without
   re-checking. An allowed target is trusted to choose where it redirects,
@@ -70,17 +76,20 @@ the Go reference does not.
   *different* key from its own random seed, so the fleet's advertised
   public key — and which replica can decrypt which client's traffic —
   would depend on which process happened to serve a given request.
-- **Only the X-Wing key ID defaults.** The Go
-  reference only ever asks the operator for one number — `CONFIGURATION_ID`
-  (defaulting to `0`) — and derives its second, legacy key's ID from it
-  mechanically: `legacyConfigID := (configID - 128) % 255`
-  (`main.go:238`). It can get away with one formula because it only ever
-  produces exactly two fixed keys, with no rotation model at all. We
-  generalize the same shape per generation instead of hardcoding a single
-  pair: every generation requires an explicit `x25519.key_id`, while
-  `xwing.key_id` defaults to the X25519 ID + 128, wrapping, with an optional
-  override. IDs do not depend on list order, so removing or reordering
-  generations does not change their identities. Startup validation rejects
-  duplicate IDs across all loaded keys.
+- **Only the X-Wing key ID defaults.** Every generation here requires
+  `x25519.key_id`; `xwing.key_id` defaults to that ID + 128, wrapping at
+  256, and can be overridden. This is not a mapping from Go's
+  `CONFIGURATION_ID`: Go uses that ID for its draft hybrid KEM and derives
+  separate IDs for X25519 and X-Wing. Compare the actual public config
+  entries rather than copying the Go setting into `x25519.key_id`.
+  IDs here do not depend on generation order; duplicate IDs across all
+  loaded keys are rejected at startup.
+- **Rewrites change the outbound Host.** This gateway uses the resolved
+  destination's Host, stripping the client-supplied header. The Go
+  reference preserves the original Host when rewriting the destination.
+  Backends using virtual-host routing must account for that difference.
+- **Request and response limits are explicit.** See the
+  [README limitations](README.md#known-limitations) for body limits and
+  timeouts that differ from Go's default HTTP client behavior.
 
 Source: <https://www.rfc-editor.org/rfc/rfc9458.html>
