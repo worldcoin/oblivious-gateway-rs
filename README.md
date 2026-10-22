@@ -101,21 +101,37 @@ structured log and non-zero exit.
 
 ### Key rotation across replicas
 
+`advertise` controls publication, not decryption. A loaded generation with
+`advertise = false` continues to serve clients holding its public configs.
+The safety requirement is that every replica eligible to receive requests
+using a new key must have that key loaded **before clients start using it**.
+
+If you control when clients adopt configs (for example, configs embedded
+in application releases), one gateway rollout can be sufficient:
+
 1. Add a generation with a new, independently generated seed and unused
-   key IDs. Set `advertise = false` and keep the old generation unchanged.
-   Restart **every replica**, including any rollback pool, to load the new
-   keys before any replica advertises them.
-2. Confirm all replicas can decrypt requests using the new public configs.
-   Set the new generation's `advertise = true` and roll out again.
-3. Distribute the new public configs through your client configuration
-   mechanism. Once appropriate, stop advertising the old generation with
-   `advertise = false`, but retain it for decryption.
-4. Remove the old generation only when no supported clients need it.
-   Account for cached configs, in-flight requests and clients embedding
-   configs in application releases. There is no automatic retirement.
+   key IDs, with `advertise = true`. Retain the old generation's seed and
+   IDs but set its `advertise = false`.
+2. Complete the rollout across every replica and verify both old and new
+   configs work. Existing clients keep using the retained old keys.
+3. Release the new client configs only after that verification. No further
+   gateway restart is needed for clients to start using the new keys.
+
+This assumes no client or probe automatically adopts the advertised keys
+during the rollout. If consumers can fetch `/ohttp-keys` and immediately
+use a new key, first deploy the new generation with `advertise = false`
+everywhere, retaining the old advertisement. Verify all replicas have
+loaded it, then advertise it in a second rollout. Otherwise a client may
+fetch a new key from an updated replica and send its request to a replica
+that cannot yet decrypt it.
+
+In either approach, remove the old generation only when no supported
+clients need it. Account for cached configs and in-flight requests as well
+as application releases. There is no automatic retirement.
 
 Do not reuse retired key IDs while clients may still hold their configs.
-After advertising new keys, a rollback must keep those keys loaded too.
+Once clients can use new keys, any rollback pool must keep those keys
+loaded too.
 
 ### Forwarding and implementation compatibility
 

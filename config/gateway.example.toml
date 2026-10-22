@@ -1,9 +1,10 @@
 # Example oblivious-gateway-rs configuration.
 #
-# Configuration is loaded once at startup; there is no hot reload. To
-# rotate keys, first load a new generation with `advertise = false` on
-# every replica while retaining the old one. Only then advertise the new
-# generation in a second rollout. See README.md for the full rotation runbook.
+# Configuration is loaded once at startup; there is no hot reload.
+# Retain old generations for decryption when rotating keys. Every replica
+# must load new keys before clients start using them. Whether this needs
+# one or two gateway rollouts depends on how clients adopt public configs;
+# see README.md for both rotation approaches.
 
 [server]
 listen_addr = "0.0.0.0:8080"
