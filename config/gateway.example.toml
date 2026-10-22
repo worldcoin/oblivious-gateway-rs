@@ -4,7 +4,7 @@
 # Retain old generations for decryption when rotating keys. Every replica
 # must load new keys before clients start using them. Whether this needs
 # one or two gateway rollouts depends on how clients adopt public configs;
-# see README.md for both rotation approaches.
+# see docs/operations.md for both rotation approaches.
 
 [server]
 listen_addr = "0.0.0.0:8080"

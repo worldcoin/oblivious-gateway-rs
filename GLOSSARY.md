@@ -89,7 +89,7 @@ parity from the shared protocol.
   reference preserves the original Host when rewriting the destination.
   Backends using virtual-host routing must account for that difference.
 - **Request and response limits are explicit.** See the
-  [README limitations](README.md#known-limitations) for body limits and
+  [operating limits](docs/operations.md#limits-and-errors) for body limits and
   timeouts that differ from Go's default HTTP client behavior.
 
 Source: <https://www.rfc-editor.org/rfc/rfc9458.html>
