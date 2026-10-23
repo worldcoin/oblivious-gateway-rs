@@ -1,9 +1,10 @@
 # Example oblivious-gateway-rs configuration.
 #
-# Configuration is loaded once at startup; there is no hot reload. To
-# rotate keys, add a new [[generations]] entry (with `advertise = true`)
-# while keeping the old one loaded (set `advertise = false` once clients
-# have adopted the new generation), then restart.
+# Configuration is loaded once at startup; there is no hot reload.
+# Retain old generations for decryption when rotating keys. Every replica
+# must load new keys before clients start using them. Whether this needs
+# one or two gateway rollouts depends on how clients adopt public configs;
+# see docs/operations.md for both rotation approaches.
 
 [server]
 listen_addr = "0.0.0.0:8080"
@@ -16,17 +17,21 @@ shutdown_grace_seconds = 30
 # key_file = "/etc/oblivious-gateway/tls/key.pem"
 
 # Prometheus metrics are served at /metrics on their own listener. Omit this
-# section to disable metrics entirely.
+# section to disable metrics entirely. For Docker port publishing or a
+# remote scraper, bind to "0.0.0.0:9090" and restrict access with host port
+# bindings/firewall/network policies. Metrics have no authentication.
 [metrics]
 listen_addr = "127.0.0.1:9090"
 
 [forwarding]
-# Exact host[:port] allowlist matched against the inner request's Host.
+# Exact host[:port] allowlist matched against the BHTTP authority, or Host
+# when authority is absent. Checked before rewrites.
 # Required unless the process is started with --allow-any-target.
 allowed_targets = ["api.example.com", "internal.example.com:8443"]
 
 # Optional scheme/host rewrites applied after the allowlist check, e.g. to
-# route a public hostname to an internal service address.
+# route a public hostname to an internal service address. The outbound Host
+# becomes the rewritten destination; the original client Host is not retained.
 [forwarding.rewrites]
 "internal.example.com:8443" = { scheme = "https", host = "internal-service.svc.cluster.local:443" }
 
@@ -42,11 +47,12 @@ allowed_targets = ["api.example.com", "internal.example.com:8443"]
 #
 # Every generation requires an explicit `x25519.key_id`, including the first.
 # Omit `xwing` (or its `key_id`) to derive it from the X25519 key ID by
-# adding 128 (wrapping) - the same shape as Go's own legacy-configuration
-# derivation (`(configID - 128) % 255`), generalized to a per-generation
-# pair instead of one fixed pair. IDs must be unique across all loaded keys.
+# adding 128 (wrapping at 256). This is not a conversion from another
+# implementation's key IDs. IDs must be unique across all loaded keys.
 # Keep IDs stable when reordering or removing generations.
-# `advertise` defaults to true; set false only for decrypt-only generations.
+# `advertise` defaults to true and controls both KEMs together; false loads
+# both keys for decryption without publishing them. Each advertised generation
+# publishes X25519 then X-Wing; clients determine which supported key to use.
 [[generations]]
 x25519 = { key_id = 0 }
 # Seed material should come from an environment variable or a mounted file

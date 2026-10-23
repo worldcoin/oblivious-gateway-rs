@@ -27,7 +27,7 @@ const OHTTP_REQUEST_CONTENT_TYPE: &str = "message/ohttp-req";
 const OHTTP_RESPONSE_CONTENT_TYPE: &str = "message/ohttp-res";
 
 /// Matches axum's own default `Bytes` extractor limit (documented in
-/// README.md's "Known limitations"): 2 MiB.
+/// docs/operations.md's "Limits and errors"): 2 MiB.
 const MAX_ENCAPSULATED_REQUEST_BYTES: usize = 2 * 1024 * 1024;
 
 /// Upper bound on reading the Encapsulated Request body, so a client that
