@@ -17,6 +17,21 @@ Tests use local targets and TLS fixtures, not external services. Coverage
 includes Go-compatible X25519 derivation, both KEMs, config validation,
 forwarding, rotation, telemetry and TLS acceptance.
 
+## Nix development environment
+
+The flake provides a reproducible dev shell: the Rust toolchain pinned in
+`rust-toolchain.toml` (via rust-overlay) plus CMake, Clang and pkg-config for
+`aws-lc-rs`. Requires Nix with flakes enabled.
+
+```sh
+nix develop                          # enter the dev shell
+nix develop -c cargo test --locked   # run tests without an interactive shell
+```
+
+`flake.lock` pins the flake inputs (`nixpkgs`, `rust-overlay`). The flake is a
+dev environment only, not a package of the gateway. CI installs the same native
+dependencies directly and tracks the latest stable Rust.
+
 ## Load tests
 
 The manual [load-test workflow](../.github/workflows/load-test.yml) runs
