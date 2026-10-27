@@ -2,7 +2,8 @@
 //! message" (RFC 9458 §4.1's own phrase for what an Encapsulated Request
 //! protects) and ordinary HTTP as understood by `reqwest`.
 //!
-//! Known-length framing is used on both directions using RFC 9292's known-length message format.
+//! Requests may use either the known-length or indeterminate-length form;
+//! responses are always written in the known-length form.
 
 use std::collections::HashSet;
 use std::io::Cursor;
@@ -64,14 +65,29 @@ pub struct BinaryHttpRequest {
     pub body: Vec<u8>,
 }
 
-/// Decode a known-length BHTTP request
+/// Framing indicator of an indeterminate-length request (RFC 9292 §3.2).
+const INDETERMINATE_LENGTH_REQUEST: u8 = 2;
+
+/// Decode a BHTTP request
 ///
 /// # Errors
 ///
-/// Returns [`PayloadError::Malformed`] if `bytes` isn't a valid
-/// known-length BHTTP request, or its parts aren't valid HTTP. Returns
+/// Returns [`PayloadError::Malformed`] if `bytes` isn't a valid BHTTP
+/// request, or any of its header or trailer fields aren't valid HTTP. Returns
 /// [`PayloadError::UnsupportedExpectation`] for a 100-continue expectation.
 pub fn decode_request(bytes: &[u8]) -> Result<BinaryHttpRequest, PayloadError> {
+    // RFC 9292 §3.8 lets a message end after its header section, omitting
+    // empty content and trailer sections, but in the indeterminate-length
+    // form `bhttp` requires the trailer terminator. Two appended zeros can
+    // only terminate the content and trailer sections, and are otherwise
+    // read as padding, so a truncated header section is still rejected.
+    let padded;
+    let bytes = if bytes.first() == Some(&INDETERMINATE_LENGTH_REQUEST) {
+        padded = [bytes, &[0, 0]].concat();
+        &padded[..]
+    } else {
+        bytes
+    };
     let mut cursor = Cursor::new(bytes);
     let message = Message::read_bhttp(&mut cursor).map_err(|_| PayloadError::Malformed)?;
 
@@ -104,14 +120,28 @@ pub fn decode_request(bytes: &[u8]) -> Result<BinaryHttpRequest, PayloadError> {
             .map(|field| field.value()),
     );
 
+    // RFC 9292 §4: a message with an invalid field must not be processed,
+    // even if that field would be dropped below. Trailers are validated and
+    // then discarded because the outbound request carries no trailers.
+    let parse_field = |field: &bhttp::Field| {
+        Ok::<_, PayloadError>((
+            HeaderName::from_bytes(field.name()).map_err(|_| PayloadError::Malformed)?,
+            HeaderValue::from_bytes(field.value()).map_err(|_| PayloadError::Malformed)?,
+        ))
+    };
+    for field in message.trailer().iter() {
+        parse_field(field)?;
+    }
+
     let mut headers = HeaderMap::new();
     let mut host_header_values: Vec<HeaderValue> = Vec::new();
     for field in message.header().iter() {
+        let (name, value) = parse_field(field)?;
         // RFC 9458 §5.1 forbids this handshake inside an encapsulated request.
         // Check before removing connection-specific fields.
-        if field.name().eq_ignore_ascii_case(b"expect")
-            && field
-                .value()
+        if name == reqwest::header::EXPECT
+            && value
+                .as_bytes()
                 .split(|b| *b == b',')
                 .any(|value| value.trim_ascii().eq_ignore_ascii_case(b"100-continue"))
         {
@@ -122,8 +152,6 @@ pub fn decode_request(bytes: &[u8]) -> Result<BinaryHttpRequest, PayloadError> {
         {
             continue;
         }
-        let name = HeaderName::from_bytes(field.name()).map_err(|_| PayloadError::Malformed)?;
-        let value = HeaderValue::from_bytes(field.value()).map_err(|_| PayloadError::Malformed)?;
         // Never forward the client's own Host header: the outbound request
         // always goes to the (allowlist-checked) authority/rewrite target,
         // and letting a client-supplied Host reach the target verbatim
@@ -143,7 +171,11 @@ pub fn decode_request(bytes: &[u8]) -> Result<BinaryHttpRequest, PayloadError> {
         if name == reqwest::header::CONTENT_LENGTH {
             continue;
         }
-        headers.append(name, value);
+        // `HeaderMap::append` panics once the map reaches its maximum size,
+        // which a 2 MiB request of short fields can exceed.
+        headers
+            .try_append(name, value)
+            .map_err(|_| PayloadError::Malformed)?;
     }
 
     // RFC 9292 permits an empty authority when the destination is in Host.
@@ -251,6 +283,82 @@ mod tests {
         let decoded = decode_request(&encode(&request)).unwrap();
         assert!(!decoded.headers.contains_key("content-length"));
         assert_eq!(decoded.body, b"hello");
+    }
+
+    fn request() -> Message {
+        Message::request(
+            b"POST".to_vec(),
+            b"https".to_vec(),
+            b"allowed.example".to_vec(),
+            b"/".to_vec(),
+        )
+    }
+
+    #[test]
+    fn truncated_indeterminate_length_requests_are_decoded() {
+        let mut empty = Vec::new();
+        request()
+            .write_bhttp(Mode::IndeterminateLength, &mut empty)
+            .unwrap();
+        // Header terminator, empty content, then empty trailer terminator.
+        assert!(empty.ends_with(&[0, 0, 0]));
+        for omitted in [1, 2] {
+            let decoded = decode_request(&empty[..empty.len() - omitted]).unwrap();
+            assert_eq!(decoded.authority, "allowed.example", "omitted {omitted}");
+            assert!(decoded.body.is_empty());
+        }
+        assert!(matches!(
+            decode_request(&empty[..empty.len() - 3]),
+            Err(PayloadError::Malformed)
+        ));
+
+        let mut with_content = request();
+        with_content.write_content(b"hi");
+        let mut encoded = Vec::new();
+        with_content
+            .write_bhttp(Mode::IndeterminateLength, &mut encoded)
+            .unwrap();
+        for omitted in [1, 2] {
+            let decoded = decode_request(&encoded[..encoded.len() - omitted]).unwrap();
+            assert_eq!(decoded.body, b"hi", "omitted {omitted}");
+        }
+    }
+
+    #[test]
+    fn invalid_fields_are_malformed_even_when_they_would_be_dropped() {
+        let mut hop_by_hop_crlf = request();
+        hop_by_hop_crlf.put_header(b"te".to_vec(), b"x\r\nx-injected: 1".to_vec());
+        let mut nominated_pseudo_field = request();
+        nominated_pseudo_field.put_header(b"connection".to_vec(), b":method".to_vec());
+        nominated_pseudo_field.put_header(b":method".to_vec(), b"DELETE".to_vec());
+        let mut trailer_nul = request();
+        trailer_nul.put_trailer(b"x-trailer".to_vec(), b"a\0b".to_vec());
+
+        for (case, message) in [
+            ("hop-by-hop CRLF", hop_by_hop_crlf),
+            ("connection-nominated pseudo-field", nominated_pseudo_field),
+            ("trailer NUL", trailer_nul),
+        ] {
+            assert!(
+                matches!(
+                    decode_request(&encode(&message)),
+                    Err(PayloadError::Malformed)
+                ),
+                "{case}"
+            );
+        }
+    }
+
+    #[test]
+    fn too_many_header_fields_are_malformed() {
+        let mut message = request();
+        for i in 0..=32_768 {
+            message.put_header(format!("x-{i}").into_bytes(), b"1".to_vec());
+        }
+        assert!(matches!(
+            decode_request(&encode(&message)),
+            Err(PayloadError::Malformed)
+        ));
     }
 
     #[test]
