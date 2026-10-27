@@ -72,7 +72,12 @@ The allowlist matches the original BHTTP authority, or Host when authority
 is absent, including any port. Rewrites apply afterward and replace the
 destination scheme/host. The outbound Host comes from the resolved target;
 the original client Host is not retained. Hop-by-hop headers and supplied
-Host/Content-Length headers are stripped.
+Host/Content-Length headers are stripped. Request trailers are validated,
+then dropped.
+
+The gateway has no replay protection: a resent Encapsulated Request is
+forwarded again. Targets with non-idempotent operations must tolerate or
+reject duplicates themselves (RFC 9458 §6.5).
 
 An allowed target is trusted to redirect elsewhere: redirect destinations
 are not checked against the allowlist. There is no private-address or DNS
@@ -142,6 +147,8 @@ The logged `target_host` is the matching configured allowlist entry before
 rewrites/redirects. It is omitted for unlisted hosts and unrestricted
 forwarding. Paths, queries, headers, bodies and seeds are not logged;
 nonstandard methods become `OTHER`. Debug logs can be high-volume.
+Debug and trace output from the `ohttp` crate is always suppressed because
+it includes response encryption keys.
 There is no OpenTelemetry span instrumentation or distributed trace export.
 
 ## Docker

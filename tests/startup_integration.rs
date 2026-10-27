@@ -1,3 +1,4 @@
+use std::io::{BufRead, BufReader};
 use std::net::{SocketAddr, TcpListener};
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
@@ -9,6 +10,12 @@ struct GatewayProcess {
 
 impl GatewayProcess {
     fn start(metrics_addr: SocketAddr) -> Self {
+        Self::spawn(metrics_addr, |command| {
+            command.stdout(Stdio::null());
+        })
+    }
+
+    fn spawn(metrics_addr: SocketAddr, configure: impl FnOnce(&mut Command)) -> Self {
         let directory = tempfile::tempdir().unwrap();
         let config = directory.path().join("gateway.toml");
         std::fs::write(
@@ -36,13 +43,10 @@ seed = {{ hex = "{}" }}
             ),
         )
         .unwrap();
-        let child = Command::new(env!("CARGO_BIN_EXE_oblivious-gateway"))
-            .arg("--config")
-            .arg(config)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .unwrap();
+        let mut command = Command::new(env!("CARGO_BIN_EXE_oblivious-gateway"));
+        command.arg("--config").arg(config).stderr(Stdio::null());
+        configure(&mut command);
+        let child = command.spawn().unwrap();
         Self {
             child,
             _directory: directory,
@@ -105,4 +109,24 @@ async fn binary_exits_unsuccessfully_when_metrics_port_is_occupied() {
     .await
     .expect("gateway stayed alive without its configured metrics listener");
     assert!(!status.success());
+}
+
+#[test]
+fn trace_logging_omits_ohttp_secret_material() {
+    let reservation = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = reservation.local_addr().unwrap();
+    drop(reservation);
+    let mut gateway = GatewayProcess::spawn(address, |command| {
+        command.env("RUST_LOG", "trace").stdout(Stdio::piped());
+    });
+    // Without filtering, `ohttp` traces each key derivation during startup.
+    let stdout = BufReader::new(gateway.child.stdout.take().unwrap());
+    for line in stdout.lines() {
+        let line = line.unwrap();
+        assert!(!line.contains(r#""target":"ohttp"#), "{line}");
+        if line.contains("listening") {
+            return;
+        }
+    }
+    panic!("gateway exited before listening");
 }
