@@ -129,6 +129,9 @@ and upstream status classes, not only outer HTTP status. An upstream 5xx
 can have gateway outcome `success` because forwarding succeeded. Use an
 encrypted end-to-end probe; `/health` checks liveness only.
 
+Histogram samples are folded into their buckets every 5 s, so gateway memory
+stays bounded when scrapes are infrequent or stop entirely.
+
 Logs are JSON on stdout. `RUST_LOG=info,oblivious_gateway=debug` enables a
 completion entry per handled gateway request, including rejections, with
 outcome, duration, outer status and inner method/status when available.

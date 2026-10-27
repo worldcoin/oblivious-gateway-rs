@@ -19,13 +19,18 @@ use eyre::WrapErr;
 /// failure doesn't spin.
 const METRICS_RESTART_DELAY: Duration = Duration::from_secs(1);
 
+/// How often buffered histogram samples are folded into their buckets,
+/// independent of scrapes (the exporter's own default upkeep interval).
+const METRICS_UPKEEP_INTERVAL: Duration = Duration::from_secs(5);
+
 async fn render(State(handle): State<PrometheusHandle>) -> String {
     handle.render()
 }
 
 /// Install the global Prometheus recorder and serve it at `/metrics` on its
 /// own listener. Must be called from within a Tokio runtime; the listener
-/// itself is spawned as a background task and outlives this function.
+/// and the histogram upkeep are spawned as background tasks and outlive
+/// this function.
 ///
 /// # Errors
 ///
@@ -49,6 +54,17 @@ pub async fn install(listen_addr: &str) -> eyre::Result<()> {
         .wrap_err("configuring histogram buckets")?
         .install_recorder()
         .wrap_err("installing Prometheus recorder")?;
+
+    // `install_recorder` doesn't spawn the exporter's upkeep task: without
+    // it, every histogram sample stays buffered until the next scrape.
+    let upkeep_handle = handle.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(METRICS_UPKEEP_INTERVAL);
+        loop {
+            interval.tick().await;
+            upkeep_handle.run_upkeep();
+        }
+    });
 
     let app = Router::new()
         .route("/metrics", get(render))
