@@ -4,6 +4,10 @@ use std::time::Duration;
 
 use clap::Parser;
 use eyre::{WrapErr, bail};
+use tracing::Level;
+use tracing_subscriber::EnvFilter;
+use tracing_subscriber::filter::filter_fn;
+use tracing_subscriber::prelude::*;
 
 use oblivious_gateway::config::FileConfig;
 use oblivious_gateway::forward::Forwarder;
@@ -36,12 +40,21 @@ struct Cli {
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+    // `ohttp` logs derived response keys and nonces at trace level, so its
+    // debug and trace output is dropped whatever `RUST_LOG` requests.
+    let hide_ohttp_secrets = filter_fn(|metadata| {
+        let target = metadata.target();
+        *metadata.level() <= Level::INFO || !(target == "ohttp" || target.starts_with("ohttp::"))
+    });
+    tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::fmt::layer()
+                .json()
+                .with_filter(
+                    EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
+                )
+                .with_filter(hide_ohttp_secrets),
         )
-        .json()
         .init();
 
     if let Err(err) = run().await {

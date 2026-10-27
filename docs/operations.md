@@ -142,6 +142,8 @@ The logged `target_host` is the matching configured allowlist entry before
 rewrites/redirects. It is omitted for unlisted hosts and unrestricted
 forwarding. Paths, queries, headers, bodies and seeds are not logged;
 nonstandard methods become `OTHER`. Debug logs can be high-volume.
+Debug and trace output from the `ohttp` crate is always suppressed because
+it includes response encryption keys.
 There is no OpenTelemetry span instrumentation or distributed trace export.
 
 ## Docker
