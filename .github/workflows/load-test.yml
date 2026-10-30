@@ -22,7 +22,7 @@ jobs:
       group: arc-public-4xlarge-amd64-runner
     timeout-minutes: 30
     env:
-      PROBE_IMAGE: ghcr.io/worldcoin/ohttp-tools/ohttp-probe:latest
+      PROBE_IMAGE: ghcr.io/worldcoin/ohttp-tools/ohttp-probe@sha256:5661d4d41bbe32034be3ce775abeac032bf38f46ada0479a9149e809397e9870
       KEM: ${{ matrix.kem }}
       DURATION: ${{ inputs.duration }}
       RATES: '1 10 100 1000 10000'
