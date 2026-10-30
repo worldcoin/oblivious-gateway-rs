@@ -822,11 +822,34 @@ async fn stalled_request_body_times_out() {
 
 #[tokio::test(start_paused = true)]
 async fn admission_bounds_uploads_and_releases_capacity() {
+    assert_admission_limit(64).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn configured_admission_limit_above_default_is_enforced() {
+    assert_admission_limit(96).await;
+}
+
+async fn assert_admission_limit(limit: usize) {
     use futures_util::{poll, stream};
     let authority = spawn_target().await.to_string();
-    let app = build_app(vec![authority.clone()]);
+    let app = if limit == 64 {
+        build_app(vec![authority.clone()])
+    } else {
+        let state = Arc::new(AppState {
+            key_ring: KeyRing::load(&test_generations()).unwrap(),
+            forwarder: Forwarder::new(
+                &ForwardingConfig {
+                    allowed_targets: vec![authority.clone()],
+                    rewrites: Default::default(),
+                },
+                false,
+            ),
+        });
+        oblivious_gateway::build_router_with_concurrency_limit(state, limit)
+    };
     let mut pending = Vec::new();
-    for _ in 0..64 {
+    for _ in 0..limit {
         let request = Request::builder()
             .method("POST")
             .uri("/gateway")

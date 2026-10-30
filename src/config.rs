@@ -12,6 +12,13 @@ use serde::Deserialize;
 /// (32 bytes: as many bits of entropy as an X25519 secret key).
 pub const MIN_SEED_LEN: usize = 32;
 
+/// Default per-router admission bound; tune against deployed capacity.
+pub const DEFAULT_MAX_IN_FLIGHT_REQUESTS: usize = 64;
+
+fn default_max_in_flight_requests() -> usize {
+    DEFAULT_MAX_IN_FLIGHT_REQUESTS
+}
+
 fn default_advertise() -> bool {
     true
 }
@@ -40,6 +47,9 @@ pub struct FileConfig {
 pub struct ServerConfig {
     /// Address to listen on, e.g. `"0.0.0.0:8080"`.
     pub listen_addr: String,
+    /// Maximum active gateway handlers; excess requests receive outer 503.
+    #[serde(default = "default_max_in_flight_requests")]
+    pub max_in_flight_requests: usize,
     /// How long to wait for in-flight requests to finish during shutdown,
     /// before forcing the process to exit. Defaults to 30 seconds.
     #[serde(default = "default_shutdown_grace_seconds")]
@@ -218,6 +228,13 @@ impl FileConfig {
     }
 
     fn validate(&self) -> eyre::Result<()> {
+        if !(1..=tokio::sync::Semaphore::MAX_PERMITS).contains(&self.server.max_in_flight_requests)
+        {
+            bail!(
+                "server.max_in_flight_requests must be between 1 and {}",
+                tokio::sync::Semaphore::MAX_PERMITS
+            );
+        }
         if self.generations.is_empty() {
             bail!("at least one key generation is required");
         }

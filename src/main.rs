@@ -13,7 +13,7 @@ use oblivious_gateway::config::FileConfig;
 use oblivious_gateway::forward::Forwarder;
 use oblivious_gateway::gateway::AppState;
 use oblivious_gateway::keys::KeyRing;
-use oblivious_gateway::{build_router, metrics, tls};
+use oblivious_gateway::{build_router_with_concurrency_limit, metrics, tls};
 
 /// Standalone Rust Oblivious HTTP (RFC 9458) gateway.
 #[derive(Parser, Debug)]
@@ -101,7 +101,7 @@ async fn run() -> eyre::Result<()> {
         key_ring,
         forwarder,
     });
-    let app = build_router(state);
+    let app = build_router_with_concurrency_limit(state, file_config.server.max_in_flight_requests);
 
     let addr: std::net::SocketAddr =
         file_config.server.listen_addr.parse().wrap_err_with(|| {

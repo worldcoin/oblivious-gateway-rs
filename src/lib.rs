@@ -42,12 +42,24 @@ use crate::gateway::AppState;
 /// Build the gateway's router: `/gateway`, `/ohttp-keys` and `/health`.
 /// Unknown routes fall through to axum's default 404.
 pub fn build_router(state: Arc<AppState>) -> Router {
+    build_router_with_concurrency_limit(state, config::DEFAULT_MAX_IN_FLIGHT_REQUESTS)
+}
+
+/// Build a router with a shared bound on active gateway handlers.
+///
+/// # Panics
+/// Panics if the limit is zero or exceeds Tokio's semaphore capacity.
+pub fn build_router_with_concurrency_limit(
+    state: Arc<AppState>,
+    max_in_flight_requests: usize,
+) -> Router {
+    assert!((1..=tokio::sync::Semaphore::MAX_PERMITS).contains(&max_in_flight_requests));
     Router::new()
         .route(
             "/gateway",
             post(gateway::gateway_handler)
                 .layer(axum::middleware::from_fn_with_state(
-                    Arc::new(tokio::sync::Semaphore::new(64)),
+                    Arc::new(tokio::sync::Semaphore::new(max_in_flight_requests)),
                     gateway::admit_request,
                 ))
                 .fallback(gateway::method_not_allowed),

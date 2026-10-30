@@ -234,3 +234,41 @@ fn every_generation_requires_an_x25519_key_id() {
         }
     }
 }
+
+#[test]
+fn admission_limit_defaults_and_accepts_operator_value() {
+    let file = write_temp(VALID_BASE);
+    assert_eq!(
+        FileConfig::load(file.path())
+            .unwrap()
+            .server
+            .max_in_flight_requests,
+        64
+    );
+    let file =
+        write_temp(&VALID_BASE.replace("[server]", "[server]\nmax_in_flight_requests = 512"));
+    assert_eq!(
+        FileConfig::load(file.path())
+            .unwrap()
+            .server
+            .max_in_flight_requests,
+        512
+    );
+}
+
+#[test]
+fn invalid_admission_limits_fail_startup() {
+    for value in [
+        "0".to_string(),
+        (tokio::sync::Semaphore::MAX_PERMITS + 1).to_string(),
+    ] {
+        let file = write_temp(&VALID_BASE.replace(
+            "[server]",
+            &format!("[server]\nmax_in_flight_requests = {value}"),
+        ));
+        assert!(
+            format!("{:#}", FileConfig::load(file.path()).unwrap_err())
+                .contains("server.max_in_flight_requests")
+        );
+    }
+}
