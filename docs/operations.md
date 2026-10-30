@@ -97,6 +97,7 @@ Limits are currently fixed, not operator-configurable:
 | Limit | Value | Failure response |
 |---|---|---|
 | Encrypted request, including OHTTP/BHTTP overhead | 2 MiB | Outer 400 |
+| Inner headers plus trailers (including discarded fields) | 128 fields | Encrypted 400 |
 | Upstream response body | 2 MiB | Encrypted 500 |
 | Inbound encrypted-body read | 30 seconds | Outer 400 |
 | Upstream connect / total request | 10 / 30 seconds | Encrypted 504 on timeout |

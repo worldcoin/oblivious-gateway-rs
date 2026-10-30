@@ -68,6 +68,75 @@ pub struct BinaryHttpRequest {
 /// Framing indicator of an indeterminate-length request (RFC 9292 §3.2).
 const INDETERMINATE_LENGTH_REQUEST: u8 = 2;
 
+const MAX_REQUEST_FIELDS: usize = 128;
+
+// Walk borrowed framing before the dependency allocates field objects. Count
+// wire fields, including cookies that the dependency merges and dropped trailers.
+fn check_field_budget(mut bytes: &[u8]) -> Result<(), PayloadError> {
+    fn integer(bytes: &mut &[u8]) -> Result<Option<usize>, PayloadError> {
+        let Some(&first) = bytes.first() else {
+            return Ok(None);
+        };
+        let width = 1usize << (first >> 6);
+        let encoded = bytes.get(..width).ok_or(PayloadError::Malformed)?;
+        let value = encoded[1..]
+            .iter()
+            .fold(u64::from(first & 63), |v, b| (v << 8) | u64::from(*b));
+        *bytes = &bytes[width..];
+        Ok(Some(
+            usize::try_from(value).map_err(|_| PayloadError::Malformed)?,
+        ))
+    }
+    fn vector<'a>(bytes: &mut &'a [u8]) -> Result<Option<&'a [u8]>, PayloadError> {
+        let Some(length) = integer(bytes)? else {
+            return Ok(None);
+        };
+        let value = bytes.get(..length).ok_or(PayloadError::Malformed)?;
+        *bytes = &bytes[length..];
+        Ok(Some(value))
+    }
+    fn fields(bytes: &mut &[u8], terminated: bool, count: &mut usize) -> Result<(), PayloadError> {
+        loop {
+            match vector(bytes)? {
+                None if !terminated => return Ok(()),
+                Some([]) if terminated => return Ok(()),
+                Some(name) if !name.is_empty() => {
+                    *count += 1;
+                    if *count > MAX_REQUEST_FIELDS {
+                        return Err(PayloadError::Malformed);
+                    }
+                    vector(bytes)?.ok_or(PayloadError::Malformed)?;
+                }
+                _ => return Err(PayloadError::Malformed),
+            }
+        }
+    }
+    fn section(bytes: &mut &[u8], known: bool, count: &mut usize) -> Result<(), PayloadError> {
+        if known {
+            let mut section = vector(bytes)?.unwrap_or_default();
+            fields(&mut section, false, count)
+        } else {
+            fields(bytes, true, count)
+        }
+    }
+    let known = match integer(&mut bytes)? {
+        Some(0) => true,
+        Some(2) => false,
+        _ => return Err(PayloadError::Malformed),
+    };
+    for _ in 0..4 {
+        vector(&mut bytes)?.ok_or(PayloadError::Malformed)?;
+    }
+    let mut count = 0;
+    section(&mut bytes, known, &mut count)?;
+    while let Some(content) = vector(&mut bytes)? {
+        if known || content.is_empty() {
+            break;
+        }
+    }
+    section(&mut bytes, known, &mut count)
+}
+
 /// Decode a BHTTP request
 ///
 /// # Errors
@@ -88,6 +157,7 @@ pub fn decode_request(bytes: &[u8]) -> Result<BinaryHttpRequest, PayloadError> {
     } else {
         bytes
     };
+    check_field_budget(bytes)?;
     let mut cursor = Cursor::new(bytes);
     let message = Message::read_bhttp(&mut cursor).map_err(|_| PayloadError::Malformed)?;
 
@@ -267,6 +337,49 @@ mod tests {
             .write_bhttp(Mode::KnownLength, &mut encoded)
             .unwrap();
         encoded
+    }
+
+    #[test]
+    fn field_budget_covers_all_wire_fields_and_both_modes() {
+        for mode in [Mode::KnownLength, Mode::IndeterminateLength] {
+            for name in [b"x".as_slice(), b"host", b"connection", b"cookie"] {
+                for trailers in [0, 64, 128] {
+                    for total in [128, 129] {
+                        let mut message = request();
+                        for _ in 0..total - trailers {
+                            message.put_header(name.to_vec(), b"x".to_vec());
+                        }
+                        for _ in 0..trailers {
+                            message.put_trailer(b"x".to_vec(), b"x".to_vec());
+                        }
+                        message.write_content([0, 255, 0, 128]);
+                        let mut bytes = Vec::new();
+                        message.write_bhttp(mode, &mut bytes).unwrap();
+                        bytes.extend_from_slice(&[0; 16]);
+                        assert_eq!(
+                            decode_request(&bytes).is_ok(),
+                            total == 128,
+                            "{mode:?} {name:?} {trailers} {total}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn framing_preflight_rejects_truncated_and_response_inputs() {
+        for bytes in [
+            &[0, 255][..],
+            &[64][..],
+            &[3, 0][..],
+            &[0, 255, 255, 255, 255, 255, 255, 255, 255][..],
+        ] {
+            assert!(decode_request(bytes).is_err());
+        }
+        let mut bytes = encode(&request());
+        bytes.splice(..1, [0x40, 0]);
+        assert!(decode_request(&bytes).is_ok());
     }
 
     #[test]
