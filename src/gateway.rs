@@ -39,6 +39,22 @@ fn is_ohttp_request_content_type(value: Option<&str>) -> bool {
     value.is_some_and(|value| value.eq_ignore_ascii_case(OHTTP_REQUEST_CONTENT_TYPE))
 }
 
+// Fail before polling the body; waiting for a permit would retain an unbounded
+// queue. The guard also releases capacity when the handler is cancelled.
+pub(crate) async fn admit_request(
+    State(permits): State<Arc<tokio::sync::Semaphore>>,
+    request: Request,
+    next: axum::middleware::Next,
+) -> Response {
+    let Ok(_permit) = permits.try_acquire() else {
+        let mut metrics = RequestMetrics::start("gateway");
+        metrics.set_outcome("overloaded");
+        metrics.set_outer_status(503);
+        return (StatusCode::SERVICE_UNAVAILABLE, "Service Unavailable").into_response();
+    };
+    next.run(request).await
+}
+
 pub(crate) async fn method_not_allowed() -> Response {
     let mut metrics = RequestMetrics::start("gateway");
     metrics.set_outcome("invalid_method");

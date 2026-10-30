@@ -819,3 +819,104 @@ async fn stalled_request_body_times_out() {
     .unwrap();
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }
+
+#[tokio::test(start_paused = true)]
+async fn admission_bounds_uploads_and_releases_capacity() {
+    assert_admission_limit(128).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn configured_admission_limit_above_default_is_enforced() {
+    assert_admission_limit(192).await;
+}
+
+async fn assert_admission_limit(limit: usize) {
+    use futures_util::{poll, stream};
+    let authority = spawn_target().await.to_string();
+    let app = if limit == 128 {
+        build_app(vec![authority.clone()])
+    } else {
+        let state = Arc::new(AppState {
+            key_ring: KeyRing::load(&test_generations()).unwrap(),
+            forwarder: Forwarder::new(
+                &ForwardingConfig {
+                    allowed_targets: vec![authority.clone()],
+                    rewrites: Default::default(),
+                },
+                false,
+            ),
+        });
+        oblivious_gateway::build_router_with_concurrency_limit(state, limit)
+    };
+    let mut pending = Vec::new();
+    for _ in 0..limit {
+        let request = Request::builder()
+            .method("POST")
+            .uri("/gateway")
+            .header("content-type", "message/ohttp-req")
+            .body(Body::from_stream(stream::pending::<
+                Result<Vec<u8>, std::io::Error>,
+            >()))
+            .unwrap();
+        let mut response = Box::pin(app.clone().oneshot(request));
+        assert!(poll!(&mut response).is_pending());
+        pending.push(response);
+    }
+    let request = Request::builder()
+        .method("POST")
+        .uri("/gateway")
+        .body(Body::from_stream(stream::poll_fn(
+            |_| -> std::task::Poll<Option<Result<Vec<u8>, std::io::Error>>> {
+                panic!("overload must not poll the body")
+            },
+        )))
+        .unwrap();
+    assert_eq!(
+        app.clone().oneshot(request).await.unwrap().status(),
+        StatusCode::SERVICE_UNAVAILABLE
+    );
+    for path in ["/health", "/ohttp-keys"] {
+        let request = Request::builder().uri(path).body(Body::empty()).unwrap();
+        assert_eq!(
+            app.clone().oneshot(request).await.unwrap().status(),
+            StatusCode::OK
+        );
+    }
+    let invalid = || {
+        Request::builder()
+            .method("POST")
+            .uri("/gateway")
+            .body(Body::empty())
+            .unwrap()
+    };
+    let independent = build_app(vec!["allowed.example".to_string()]);
+    assert_eq!(
+        independent.oneshot(invalid()).await.unwrap().status(),
+        StatusCode::BAD_REQUEST
+    );
+    drop(pending.pop());
+    for _ in 0..2 {
+        assert_eq!(
+            app.clone().oneshot(invalid()).await.unwrap().status(),
+            StatusCode::BAD_REQUEST
+        );
+    }
+    tokio::time::advance(std::time::Duration::from_secs(31)).await;
+    for response in pending {
+        assert_eq!(response.await.unwrap().status(), StatusCode::BAD_REQUEST);
+    }
+    assert_eq!(
+        app.clone().oneshot(invalid()).await.unwrap().status(),
+        StatusCode::BAD_REQUEST
+    );
+    tokio::time::resume();
+    let ring = KeyRing::load(&test_generations()).unwrap();
+    let config = key_config_for(&ring, 0);
+    let (outer, response) =
+        encrypted_gateway_request(app, &config, "POST", "/control", b"ok", &authority).await;
+    assert_eq!(outer, StatusCode::OK);
+    assert_eq!(
+        decode_bhttp_response(&response),
+        (200, b"/control:ok".to_vec())
+    );
+}

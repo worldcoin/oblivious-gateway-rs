@@ -8,7 +8,7 @@ Invalid configuration fails startup with a structured error and nonzero exit.
 
 | Section | Settings |
 |---|---|
-| `[server]` | Listen address and shutdown grace period |
+| `[server]` | Listen address, max_in_flight_requests and shutdown grace period |
 | `[server.tls]` | Optional certificate and private-key files |
 | `[metrics]` | Optional separate Prometheus listener |
 | `[forwarding]` | Target allowlist and scheme/host rewrites |
@@ -92,14 +92,26 @@ Legacy X25519+Kyber768Draft00 and Go's `/ohttp-configs`, `/gateway-echo` and
 
 ## Limits and errors
 
-Limits are currently fixed, not operator-configurable:
+The concurrency limit is configurable with `server.max_in_flight_requests`
+(a positive integer, default 128). Other limits are fixed:
 
 | Limit | Value | Failure response |
 |---|---|---|
+| Concurrent gateway handlers per process | Configured value (default 128) | Outer 503 before body read |
 | Encrypted request, including OHTTP/BHTTP overhead | 2 MiB | Outer 400 |
 | Upstream response body | 2 MiB | Encrypted 500 |
 | Inbound encrypted-body read | 30 seconds | Outer 400 |
 | Upstream connect / total request | 10 / 30 seconds | Encrypted 504 on timeout |
+
+The admission limit covers body reads, decryption, forwarding and response encryption.
+Capacity is released on completion, cancellation or timeout. Health and key
+endpoints remain available during overload. Size replica memory and ingress
+limits for the configured number of admitted requests; this is not a total process memory cap.
+The default is conservative and is not a measured production capacity target.
+Estimate average concurrency as requests/sec per replica × average handler duration
+in seconds, then allow headroom for bursts and slow targets. Validate the chosen
+value with load tests that check latency, overload responses and peak memory;
+increasing it trades overload rejections for more concurrent memory and CPU use.
 
 Bodies are buffered, not streamed. Other inbound timeouts use the server
 library's defaults.
