@@ -96,10 +96,16 @@ Limits are currently fixed, not operator-configurable:
 
 | Limit | Value | Failure response |
 |---|---|---|
+| Concurrent gateway handlers per process | 64 | Outer 503 before body read |
 | Encrypted request, including OHTTP/BHTTP overhead | 2 MiB | Outer 400 |
 | Upstream response body | 2 MiB | Encrypted 500 |
 | Inbound encrypted-body read | 30 seconds | Outer 400 |
 | Upstream connect / total request | 10 / 30 seconds | Encrypted 504 on timeout |
+
+The admission limit covers body reads, decryption, forwarding and response encryption.
+Capacity is released on completion, cancellation or timeout. Health and key
+endpoints remain available during overload. Size replica memory and ingress
+limits for up to 64 admitted requests; this is not a total process memory cap.
 
 Bodies are buffered, not streamed. Other inbound timeouts use the server
 library's defaults.

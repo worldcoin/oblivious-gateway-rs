@@ -45,7 +45,12 @@ pub fn build_router(state: Arc<AppState>) -> Router {
     Router::new()
         .route(
             "/gateway",
-            post(gateway::gateway_handler).fallback(gateway::method_not_allowed),
+            post(gateway::gateway_handler)
+                .layer(axum::middleware::from_fn_with_state(
+                    Arc::new(tokio::sync::Semaphore::new(64)),
+                    gateway::admit_request,
+                ))
+                .fallback(gateway::method_not_allowed),
         )
         .route("/ohttp-keys", any(gateway::keys_handler))
         .route("/health", get(gateway::health_handler))
