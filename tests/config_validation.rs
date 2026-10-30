@@ -243,7 +243,7 @@ fn admission_limit_defaults_and_accepts_operator_value() {
             .unwrap()
             .server
             .max_in_flight_requests,
-        64
+        128
     );
     let file =
         write_temp(&VALID_BASE.replace("[server]", "[server]\nmax_in_flight_requests = 512"));

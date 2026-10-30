@@ -13,7 +13,7 @@ use serde::Deserialize;
 pub const MIN_SEED_LEN: usize = 32;
 
 /// Default per-router admission bound; tune against deployed capacity.
-pub const DEFAULT_MAX_IN_FLIGHT_REQUESTS: usize = 64;
+pub const DEFAULT_MAX_IN_FLIGHT_REQUESTS: usize = 128;
 
 fn default_max_in_flight_requests() -> usize {
     DEFAULT_MAX_IN_FLIGHT_REQUESTS

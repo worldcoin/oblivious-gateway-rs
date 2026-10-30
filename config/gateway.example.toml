@@ -10,7 +10,7 @@
 listen_addr = "0.0.0.0:8080"
 shutdown_grace_seconds = 30
 # Concurrent handlers, not requests/sec. Tune for traffic, latency and memory.
-max_in_flight_requests = 64
+max_in_flight_requests = 128
 
 # Optional incoming TLS. Omit this section to serve plaintext HTTP, e.g.
 # when TLS terminates at an upstream load balancer.

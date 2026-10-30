@@ -93,11 +93,11 @@ Legacy X25519+Kyber768Draft00 and Go's `/ohttp-configs`, `/gateway-echo` and
 ## Limits and errors
 
 The concurrency limit is configurable with `server.max_in_flight_requests`
-(a positive integer, default 64). Other limits are fixed:
+(a positive integer, default 128). Other limits are fixed:
 
 | Limit | Value | Failure response |
 |---|---|---|
-| Concurrent gateway handlers per process | Configured value (default 64) | Outer 503 before body read |
+| Concurrent gateway handlers per process | Configured value (default 128) | Outer 503 before body read |
 | Encrypted request, including OHTTP/BHTTP overhead | 2 MiB | Outer 400 |
 | Upstream response body | 2 MiB | Encrypted 500 |
 | Inbound encrypted-body read | 30 seconds | Outer 400 |

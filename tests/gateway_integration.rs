@@ -822,18 +822,18 @@ async fn stalled_request_body_times_out() {
 
 #[tokio::test(start_paused = true)]
 async fn admission_bounds_uploads_and_releases_capacity() {
-    assert_admission_limit(64).await;
+    assert_admission_limit(128).await;
 }
 
 #[tokio::test(start_paused = true)]
 async fn configured_admission_limit_above_default_is_enforced() {
-    assert_admission_limit(96).await;
+    assert_admission_limit(192).await;
 }
 
 async fn assert_admission_limit(limit: usize) {
     use futures_util::{poll, stream};
     let authority = spawn_target().await.to_string();
-    let app = if limit == 64 {
+    let app = if limit == 128 {
         build_app(vec![authority.clone()])
     } else {
         let state = Arc::new(AppState {
