@@ -54,10 +54,8 @@ pub struct ServerConfig {
     /// before forcing the process to exit. Defaults to 30 seconds.
     #[serde(default = "default_shutdown_grace_seconds")]
     pub shutdown_grace_seconds: u64,
-    /// How long to keep accepting new requests after a shutdown signal
-    /// before draining, so load balancers stop routing to this instance
-    /// first. Replaces a `preStop` sleep on images without a shell.
-    /// Defaults to 0.
+    /// Keep serving this long after a shutdown signal before draining, so
+    /// load balancers stop routing here first. Defaults to 0.
     #[serde(default)]
     pub shutdown_delay_seconds: u64,
     /// Optional incoming TLS configuration. Omit to serve plaintext HTTP,

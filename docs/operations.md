@@ -20,13 +20,10 @@ An allowlist is required unless `--allow-any-target` or
 is intended for development only. Command-line flags override environment
 settings. Logging uses `RUST_LOG`, defaulting to `info`.
 
-On SIGTERM or Ctrl+C the gateway keeps serving for
-`server.shutdown_delay_seconds` (default 0), then stops accepting
-connections and drains in-flight requests for up to
-`shutdown_grace_seconds` (default 30). Behind a load balancer, set the delay
-to cover target deregistration (for example 10 s on Kubernetes, in place of
-a `preStop` sleep, which the distroless image cannot run). Keep the pod's
-termination grace period above delay plus grace.
+On SIGTERM the gateway keeps serving for `shutdown_delay_seconds` (default
+0), then drains for up to `shutdown_grace_seconds` (default 30). Behind a
+load balancer, set the delay to cover deregistration, e.g. 10 s instead of a
+Kubernetes `preStop` sleep, which the shell-less image cannot run.
 
 ## Keys
 

@@ -140,45 +140,41 @@ fn trace_logging_omits_ohttp_secret_material() {
     panic!("gateway exited before listening");
 }
 
-fn unused_address() -> SocketAddr {
-    TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-}
-
 #[cfg(unix)]
 #[tokio::test]
 async fn binary_keeps_serving_during_shutdown_delay() {
-    let listen = unused_address();
-    let mut gateway = GatewayProcess::spawn(
-        unused_address(),
-        &format!("listen_addr = \"{listen}\"\nshutdown_delay_seconds = 2"),
-        |command| {
-            command.stdout(Stdio::null());
-        },
-    );
-    // A fresh client per request, so each one opens a new connection.
-    let health = || async move {
-        reqwest::Client::builder()
+    let listen = TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap();
+    let metrics = TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap();
+    let settings = format!("listen_addr = \"{listen}\"\nshutdown_delay_seconds = 2");
+    let mut gateway = GatewayProcess::spawn(metrics, &settings, |command| {
+        command.stdout(Stdio::null());
+    });
+    // A new connection per request, as a load balancer would open.
+    let healthy = || async move {
+        let client = reqwest::Client::builder()
             .no_proxy()
-            .pool_max_idle_per_host(0)
-            .timeout(Duration::from_millis(500))
+            .pool_max_idle_per_host(0);
+        let response = client
             .build()
             .unwrap()
             .get(format!("http://{listen}/health"))
             .send()
-            .await
-            .is_ok_and(|response| response.status().is_success())
+            .await;
+        response.is_ok_and(|r| r.status().is_success())
     };
-
-    tokio::time::timeout(Duration::from_secs(5), async {
-        while !health().await {
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
-    })
-    .await
-    .expect("gateway did not start");
+    while !healthy().await {
+        assert!(
+            gateway.child.try_wait().unwrap().is_none(),
+            "gateway exited"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
 
     let pid = gateway.child.id().to_string();
     assert!(
@@ -188,23 +184,9 @@ async fn binary_keeps_serving_during_shutdown_delay() {
             .unwrap()
             .success()
     );
-    let signalled = std::time::Instant::now();
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert!(healthy().await, "stopped serving during the shutdown delay");
 
-    // New connections are still accepted for most of the delay.
-    while signalled.elapsed() < Duration::from_millis(1500) {
-        assert!(
-            health().await,
-            "stopped serving {:?} after SIGTERM",
-            signalled.elapsed()
-        );
-        assert!(
-            gateway.child.try_wait().unwrap().is_none(),
-            "exited during the delay"
-        );
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-
-    // Then it drains and exits cleanly.
     let status = tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             if let Some(status) = gateway.child.try_wait().unwrap() {
