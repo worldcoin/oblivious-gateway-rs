@@ -10,12 +10,21 @@ struct GatewayProcess {
 
 impl GatewayProcess {
     fn start(metrics_addr: SocketAddr) -> Self {
-        Self::spawn(metrics_addr, |command| {
+        Self::spawn(metrics_addr, "", |command| {
             command.stdout(Stdio::null());
         })
     }
 
-    fn spawn(metrics_addr: SocketAddr, configure: impl FnOnce(&mut Command)) -> Self {
+    fn spawn(
+        metrics_addr: SocketAddr,
+        server_settings: &str,
+        configure: impl FnOnce(&mut Command),
+    ) -> Self {
+        let server_settings = if server_settings.is_empty() {
+            r#"listen_addr = "127.0.0.1:0""#
+        } else {
+            server_settings
+        };
         let directory = tempfile::tempdir().unwrap();
         let config = directory.path().join("gateway.toml");
         std::fs::write(
@@ -23,7 +32,7 @@ impl GatewayProcess {
             format!(
                 r#"
 [server]
-listen_addr = "127.0.0.1:0"
+{server_settings}
 [metrics]
 listen_addr = "{metrics_addr}"
 [forwarding]
@@ -116,7 +125,7 @@ fn trace_logging_omits_ohttp_secret_material() {
     let reservation = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = reservation.local_addr().unwrap();
     drop(reservation);
-    let mut gateway = GatewayProcess::spawn(address, |command| {
+    let mut gateway = GatewayProcess::spawn(address, "", |command| {
         command.env("RUST_LOG", "trace").stdout(Stdio::piped());
     });
     // Without filtering, `ohttp` traces each key derivation during startup.
@@ -129,4 +138,82 @@ fn trace_logging_omits_ohttp_secret_material() {
         }
     }
     panic!("gateway exited before listening");
+}
+
+fn unused_address() -> SocketAddr {
+    TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn binary_keeps_serving_during_shutdown_delay() {
+    let listen = unused_address();
+    let mut gateway = GatewayProcess::spawn(
+        unused_address(),
+        &format!("listen_addr = \"{listen}\"\nshutdown_delay_seconds = 2"),
+        |command| {
+            command.stdout(Stdio::null());
+        },
+    );
+    // A fresh client per request, so each one opens a new connection.
+    let health = || async move {
+        reqwest::Client::builder()
+            .no_proxy()
+            .pool_max_idle_per_host(0)
+            .timeout(Duration::from_millis(500))
+            .build()
+            .unwrap()
+            .get(format!("http://{listen}/health"))
+            .send()
+            .await
+            .is_ok_and(|response| response.status().is_success())
+    };
+
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while !health().await {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("gateway did not start");
+
+    let pid = gateway.child.id().to_string();
+    assert!(
+        Command::new("kill")
+            .args(["-TERM", &pid])
+            .status()
+            .unwrap()
+            .success()
+    );
+    let signalled = std::time::Instant::now();
+
+    // New connections are still accepted for most of the delay.
+    while signalled.elapsed() < Duration::from_millis(1500) {
+        assert!(
+            health().await,
+            "stopped serving {:?} after SIGTERM",
+            signalled.elapsed()
+        );
+        assert!(
+            gateway.child.try_wait().unwrap().is_none(),
+            "exited during the delay"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+
+    // Then it drains and exits cleanly.
+    let status = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let Some(status) = gateway.child.try_wait().unwrap() {
+                return status;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("gateway did not exit after the delay");
+    assert!(status.success());
 }

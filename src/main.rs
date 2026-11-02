@@ -114,9 +114,17 @@ async fn run() -> eyre::Result<()> {
     let handle = axum_server::Handle::new();
     let shutdown_handle = handle.clone();
     let grace = Duration::from_secs(file_config.server.shutdown_grace_seconds);
+    let delay = Duration::from_secs(file_config.server.shutdown_delay_seconds);
     tokio::spawn(async move {
         shutdown_signal().await;
-        tracing::info!("shutdown signal received, draining connections");
+        if !delay.is_zero() {
+            tracing::info!(
+                delay_seconds = delay.as_secs(),
+                "shutdown signal received, still serving before draining"
+            );
+            tokio::time::sleep(delay).await;
+        }
+        tracing::info!("draining connections");
         shutdown_handle.graceful_shutdown(Some(grace));
     });
 
