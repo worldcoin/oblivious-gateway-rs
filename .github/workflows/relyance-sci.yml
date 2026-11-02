@@ -18,7 +18,6 @@ jobs:
 
     steps:
       - name: Run Relyance SCI
-        uses: worldcoin/gh-actions-public/relyance@main
-        # More information: https://github.com/worldcoin/gh-actions-public/tree/main/relyance
+        uses: worldcoin/gh-actions-public/relyance@f6402ebbd079e0c8bb91c5e552c281ce6132f11b # main https://github.com/worldcoin/gh-actions-public/commit/f6402ebbd079e0c8bb91c5e552c281ce6132f11b
         with:
           secrets-dpp-sci-key: ${{ secrets.DPP_SCI_KEY }}

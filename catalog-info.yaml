@@ -5,13 +5,6 @@ metadata:
     github.com/project-slug: worldcoin/oblivious-gateway-rs
   tags: ['code-lang:rust']
   description: Rust implementation of an RFC 9458 Oblivious HTTP gateway resource.
-  links:
-    - title: Linear
-      url: PLACEHOLDER-ADD-LINEAR-URL
-    - title: Documentation
-      url: PLACEHOLDER-ADD-DOCUMENTATION-URL
-    - title: Slack
-      url: PLACEHOLDER-ADD-SLACK-URL
   name: oblivious-gateway-rs
 spec:
   lifecycle: test

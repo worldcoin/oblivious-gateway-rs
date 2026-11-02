@@ -1,7 +1,7 @@
 # Publishes the gateway image to our own private ECR registry on a
 # published GitHub Release, mirroring world-chain-rundler's
-# .github/workflows/ecr-release.yaml. This repo is private and does not
-# publish images to GHCR or any public registry.
+# .github/workflows/ecr-release.yaml. Images are not published to GHCR
+# or any public registry.
 name: Release private image
 
 on:
