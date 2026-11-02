@@ -29,12 +29,17 @@ HKDF-SHA256 and AES-128-GCM.
   inline, through an environment variable, or from a file. Use a secret
   manager or protected file outside local testing; never commit seeds.
 - `x25519.key_id`: required, in the range 0–255.
-- `xwing.key_id`: optional; defaults to the X25519 ID + 128, wrapping at 256.
+- `xwing.key_id`: optional; defaults to the X25519 ID − 64, wrapping at 256.
+  This is Go's layout: X25519 128 and X-Wing 64 for its `CONFIGURATION_ID` 0.
 - `advertise`: defaults to `true`. Setting it to `false` hides **both**
   public configs but keeps both keys loaded for decryption.
 
 Key IDs must be unique across all loaded generations and stay stable when
 generations are reordered or removed. They are wire labels, not seeds.
+Give each new generation the next unused X25519 ID, as Go does by
+incrementing `CONFIGURATION_ID`. With default X-Wing IDs, X25519 IDs within
+one 64-ID range, such as 128–191, never collide; IDs 64 apart do and fail
+startup.
 Replicas serving the same keys must use identical seeds and IDs; missing
 seeds fail startup rather than creating ephemeral keys.
 
@@ -86,7 +91,7 @@ rebinding protection. Enforce network-level egress restrictions as needed.
 This gateway is not a drop-in replacement for every Go configuration.
 Compare public config entries and test encrypted round trips before
 switching implementations. See [compatibility details](../GLOSSARY.md#where-we-differ-from-the-go-reference),
-including same-seed X-Wing incompatibility and changed rewrite Host behavior.
+including key ID layout, advertisement order and changed rewrite Host behavior.
 Legacy X25519+Kyber768Draft00 and Go's `/ohttp-configs`, `/gateway-echo` and
 `/gateway-metadata` endpoints are not implemented.
 

@@ -42,30 +42,31 @@ allowed_targets = ["api.example.com", "internal.example.com:8443"]
 # generation derives one X25519 key and one X-Wing key from its own master
 # seed - different generations use different, independently generated
 # seeds, never a value derived from another generation's seed. See
-# GLOSSARY.md for why the X25519 key uses a transformed copy of the seed.
+# GLOSSARY.md for why both keys use transformed copies of the seed.
 #
 # `seed` accepts inline hex (local testing only - see below), an
 # environment variable name, or a file path, e.g. `seed = { file = "/run/secrets/..." }`.
 #
 # Every generation requires an explicit `x25519.key_id`, including the first.
 # Omit `xwing` (or its `key_id`) to derive it from the X25519 key ID by
-# adding 128 (wrapping at 256). This is not a conversion from another
-# implementation's key IDs. IDs must be unique across all loaded keys.
-# Keep IDs stable when reordering or removing generations.
+# subtracting 64 (wrapping at 256), matching the Go gateway's layout. IDs
+# must be unique across all loaded keys; give each new generation the next
+# X25519 ID. Keep IDs stable when reordering or removing generations.
 # `advertise` defaults to true and controls both KEMs together; false loads
 # both keys for decryption without publishing them. Each advertised generation
 # publishes X25519 then X-Wing; clients determine which supported key to use.
 [[generations]]
-x25519 = { key_id = 0 }
+x25519 = { key_id = 128 }
 # Seed material should come from an environment variable or a mounted file
 # in production; inline hex seeds are intended for local testing only.
 seed = { env = "OBLIVIOUS_GATEWAY_SEED" }
-# xwing omitted here: this generation gets key IDs 0 and 128.
+# xwing omitted here: this generation gets key IDs 128 and 64, as Go does
+# for CONFIGURATION_ID 0.
 
 # Example of a second, retained-but-not-advertised generation during
 # rotation - note its own independent seed (never derived from the first
 # generation's seed above) and its own stable x25519 key ID:
 # [[generations]]
-# x25519 = { key_id = 2 }
+# x25519 = { key_id = 129 }
 # advertise = false
 # seed = { file = "/run/secrets/oblivious-gateway-seed-2" }

@@ -167,56 +167,63 @@ hex = "0001020304"
     assert!(format!("{err:#}").contains("need at least"));
 }
 
+fn generations_config(generations: &[&str]) -> String {
+    let mut config = String::from(
+        "[server]\nlisten_addr = \"127.0.0.1:0\"\n[forwarding]\nallowed_targets = [\"example.invalid\"]\n",
+    );
+    for (i, slots) in generations.iter().enumerate() {
+        config.push_str(&format!(
+            "[[generations]]\n{slots}\nseed = {{ hex = \"{}\" }}\n",
+            format!("{i:02x}").repeat(32)
+        ));
+    }
+    config
+}
+
+fn key_ids(generations: &[&str]) -> eyre::Result<Vec<(u8, u8)>> {
+    let file = write_temp(&generations_config(generations));
+    let config = FileConfig::load(file.path())?;
+    Ok(config
+        .generations
+        .iter()
+        .map(|g| (g.x25519_key_id(), g.xwing_key_id()))
+        .collect())
+}
+
 #[test]
-fn xwing_key_id_defaults_and_can_be_overridden() {
-    let defaulted = write_temp(
-        r#"
-[server]
-listen_addr = "127.0.0.1:0"
-[forwarding]
-allowed_targets = ["example.invalid"]
-[[generations]]
-x25519 = { key_id = 0 }
-seed = { hex = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f" }
-"#,
+fn xwing_key_id_defaults_to_go_layout_and_can_be_overridden() {
+    // Go with CONFIGURATION_ID 0 serves X25519 at 128 and X-Wing at 64.
+    assert_eq!(
+        key_ids(&["x25519 = { key_id = 128 }"]).unwrap(),
+        [(128, 64)]
     );
-    let config = FileConfig::load(defaulted.path()).unwrap();
-    assert_eq!(config.generations[0].x25519_key_id(), 0);
-    assert_eq!(config.generations[0].xwing_key_id(), 128);
-    assert!(config.generations[0].advertise);
+    // The offset wraps below zero.
+    assert_eq!(key_ids(&["x25519 = { key_id = 5 }"]).unwrap(), [(5, 197)]);
+    // An explicit X-Wing ID replaces the default.
+    assert_eq!(
+        key_ids(&["x25519 = { key_id = 128 }\nxwing = { key_id = 129 }"]).unwrap(),
+        [(128, 129)]
+    );
+}
 
-    // x25519 explicit, xwing omitted: xwing still derives from x25519.
-    let derived = write_temp(
-        r#"
-[server]
-listen_addr = "127.0.0.1:0"
-[forwarding]
-allowed_targets = ["example.invalid"]
-[[generations]]
-x25519 = { key_id = 5 }
-seed = { hex = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f" }
-"#,
-    );
-    let config = FileConfig::load(derived.path()).unwrap();
-    assert_eq!(config.generations[0].x25519_key_id(), 5);
-    assert_eq!(config.generations[0].xwing_key_id(), 133);
+#[test]
+fn consecutive_generations_get_disjoint_default_ids() {
+    // Rotating by incrementing the X25519 ID mirrors Go incrementing
+    // CONFIGURATION_ID; up to 64 consecutive generations never collide.
+    let slots: Vec<String> = (128u8..=191)
+        .map(|id| format!("x25519 = {{ key_id = {id} }}"))
+        .collect();
+    let slots: Vec<&str> = slots.iter().map(String::as_str).collect();
+    let ids = key_ids(&slots).unwrap();
+    assert_eq!(ids.first(), Some(&(128, 64)));
+    assert_eq!(ids.last(), Some(&(191, 127)));
 
-    // Both explicit: no defaulting/derivation kicks in at all.
-    let explicit = write_temp(
-        r#"
-[server]
-listen_addr = "127.0.0.1:0"
-[forwarding]
-allowed_targets = ["example.invalid"]
-[[generations]]
-x25519 = { key_id = 5 }
-xwing = { key_id = 200 }
-seed = { hex = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f" }
-"#,
+    // X25519 IDs 64 apart collide through the default and fail startup.
+    let err = key_ids(&["x25519 = { key_id = 128 }", "x25519 = { key_id = 192 }"]).unwrap_err();
+    assert!(
+        format!("{err:#}").contains("duplicate key identifier 128"),
+        "{err:#}"
     );
-    let config = FileConfig::load(explicit.path()).unwrap();
-    assert_eq!(config.generations[0].x25519_key_id(), 5);
-    assert_eq!(config.generations[0].xwing_key_id(), 200);
 }
 
 #[test]

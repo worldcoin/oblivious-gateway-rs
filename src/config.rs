@@ -157,18 +157,16 @@ impl GenerationConfig {
 
     /// This generation's X-Wing Key Identifier.
     ///
-    /// Explicit `xwing.key_id` if set. Otherwise derived from
-    /// [`Self::x25519_key_id`] by adding 128 (wrapping) — the same shape
-    /// as the Go reference's own legacy-configuration formula
-    /// (`(configID - 128) % 255`; see `GLOSSARY.md`), adapted to a
-    /// two-argument (not fixed-pair) key model. Collisions across
-    /// generations are still caught at startup, same as an explicit ID
-    /// would be.
+    /// Explicit `xwing.key_id` if set. Otherwise [`Self::x25519_key_id`]
+    /// minus 64 (wrapping), the spacing the Go gateway uses: for its
+    /// `CONFIGURATION_ID` c it serves X25519 at `(c - 128) % 255` and X-Wing
+    /// at `(c - 192) % 255` (see `GLOSSARY.md`). Collisions across
+    /// generations are caught at startup, same as for explicit IDs.
     #[must_use]
     pub fn xwing_key_id(&self) -> u8 {
         self.xwing
             .key_id
-            .unwrap_or_else(|| self.x25519_key_id().wrapping_add(128))
+            .unwrap_or_else(|| self.x25519_key_id().wrapping_sub(64))
     }
 }
 
@@ -251,7 +249,8 @@ impl FileConfig {
             for id in [x25519_id, xwing_id] {
                 if !seen_ids.insert(id) {
                     bail!(
-                        "duplicate key identifier {id} across generations; set an explicit \
+                        "duplicate key identifier {id} across generations (an omitted \
+                         xwing.key_id defaults to x25519.key_id - 64); set an explicit \
                          key_id to resolve the conflict"
                     );
                 }

@@ -31,6 +31,7 @@ pub mod gateway;
 pub mod keys;
 pub mod metrics;
 pub mod tls;
+pub mod xwing;
 
 use std::sync::Arc;
 

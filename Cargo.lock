@@ -1434,6 +1434,7 @@ dependencies = [
 name = "oblivious-gateway"
 version = "0.1.0"
 dependencies = [
+ "aes-gcm",
  "axum",
  "axum-server",
  "bhttp",
@@ -1441,6 +1442,8 @@ dependencies = [
  "eyre",
  "futures-util",
  "hex",
+ "hkdf",
+ "hpke",
  "metrics",
  "metrics-exporter-prometheus",
  "ohttp",
@@ -1449,6 +1452,8 @@ dependencies = [
  "rustls",
  "rustls-pki-types",
  "serde",
+ "sha2",
+ "shake",
  "tempfile",
  "thiserror 2.0.20",
  "tokio",
@@ -1457,6 +1462,7 @@ dependencies = [
  "tower",
  "tracing",
  "tracing-subscriber",
+ "zeroize",
 ]
 
 [[package]]

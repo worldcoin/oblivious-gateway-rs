@@ -43,7 +43,7 @@ Not in RFC 9458:
 
 ## Where we differ from the Go reference
 
-These comparisons refer to Cloudflare's `privacy-gateway-server-go` at
+These comparisons refer to Cloudflare's `privacy-gateway-server-go` v0.0.4 at
 [revision d63adf6](https://github.com/cloudflare/privacy-gateway-server-go/tree/d63adf6f333cb2c78fad41dff5b117c7c284645e).
 Key derivation and key-ID conventions are implementation choices, not
 requirements of RFC 9458. Do not infer full configuration or wire-behavior
@@ -58,11 +58,13 @@ parity from the shared protocol.
   input byte-for-byte, verified against a fixture captured from the Go
   module. Existing encoded client configs also require the same key ID
   and cipher suite; preserving the seed alone is not sufficient.
-- **X-Wing uses the unmodified seed here.** The Go revision above flips
-  the last two seed bytes before deriving X-Wing. The same master seed
-  therefore does not produce interchangeable X-Wing keys. Both servers
-  support X-Wing, but this gateway does not support Go's additional
-  X25519+Kyber768Draft00 KEM.
+- **X-Wing derivation matches Go too.** The seed's final two bytes are
+  XORed `0xff`, and SHAKE256 of the result is the 32-byte X-Wing
+  decapsulation key, as in CIRCL. This is not HPKE's labeled
+  `DeriveKeyPair`, so X-Wing keys are held and decapsulated in
+  `src/xwing.rs` rather than by the `ohttp` crate. Verified against a
+  fixture captured from Go v0.0.4. Go's additional X25519+Kyber768Draft00
+  KEM is not supported.
 - **The allowlist is checked once, against the initial target only.**
   Redirects are followed via the HTTP client's own default policy without
   re-checking. An allowed target is trusted to choose where it redirects,
@@ -76,14 +78,19 @@ parity from the shared protocol.
   *different* key from its own random seed, so the fleet's advertised
   public key — and which replica can decrypt which client's traffic —
   would depend on which process happened to serve a given request.
-- **Only the X-Wing key ID defaults.** Every generation here requires
-  `x25519.key_id`; `xwing.key_id` defaults to that ID + 128, wrapping at
-  256, and can be overridden. This is not a mapping from Go's
-  `CONFIGURATION_ID`: Go uses that ID for its draft hybrid KEM and derives
-  separate IDs for X25519 and X-Wing. Compare the actual public config
-  entries rather than copying the Go setting into `x25519.key_id`.
-  IDs here do not depend on generation order; duplicate IDs across all
-  loaded keys are rejected at startup.
+- **Key IDs are explicit per generation, laid out like Go's.** Go derives
+  all IDs from one `CONFIGURATION_ID` c: Kyber at c, X25519 at
+  `(c - 128) % 255` and X-Wing at `(c - 192) % 255`. Here every generation
+  requires `x25519.key_id`; for Go's c use `c + 128` (mod 256), e.g. 128
+  for c = 0. `xwing.key_id` defaults to the X25519 ID − 64 (wrapping),
+  which equals Go's X-Wing ID for every c except 127 and 191, where Go's
+  `% 255` yields 0; set it explicitly there. Kyber's ID c is never served.
+  IDs do not depend on generation order; duplicate IDs across all loaded
+  keys are rejected at startup.
+- **Advertisement order differs.** Go lists X-Wing, Kyber, then X25519.
+  Here each advertised generation lists X25519 then X-Wing, in generation
+  order. Clients that pick the first or last supported entry therefore
+  choose differently between the two servers.
 - **Rewrites change the outbound Host.** This gateway uses the resolved
   destination's Host, stripping the client-supplied header. The Go
   reference preserves the original Host when rewriting the destination.

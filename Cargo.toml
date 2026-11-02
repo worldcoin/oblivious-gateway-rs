@@ -14,12 +14,15 @@ name = "oblivious-gateway"
 path = "src/main.rs"
 
 [dependencies]
+aes-gcm = "0.11"
 axum = "0.7"
 axum-server = { version = "0.8.0", features = ["tls-rustls"] }
 bhttp = { version = "0.5", features = ["bhttp", "read-bhttp", "write-bhttp"] }
 clap = { version = "4.6.7", features = ["derive", "env"] }
 eyre = "0.6"
 hex = "0.4.3"
+hkdf = "0.13"
+hpke = { version = "0.14.1", default-features = false, features = ["alloc", "mlkem", "aes", "hkdfsha2"] }
 metrics = "0.24"
 metrics-exporter-prometheus = "0.16"
 ohttp = { version = "0.8", features = ["server", "rust-hpke"], default-features = false }
@@ -28,11 +31,14 @@ reqwest = { version = "0.13.5", default-features = false, features = ["rustls", 
 rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs", "std", "tls12"] }
 rustls-pki-types = { version = "1", features = ["std"] }
 serde = { version = "1.0.229", features = ["derive"] }
+sha2 = "0.11"
+shake = "0.1"
 thiserror = "2.0.20"
 tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "signal", "net", "fs", "time", "sync"] }
 toml = "1.1.6"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
+zeroize = "1"
 
 [dev-dependencies]
 futures-util = "0.3"

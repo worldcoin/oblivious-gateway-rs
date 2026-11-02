@@ -293,6 +293,48 @@ async fn allowed_target_round_trip_x25519_and_xwing() {
 }
 
 #[tokio::test]
+async fn altered_encapsulated_requests_are_outer_400_for_both_kems() {
+    let key_ring = KeyRing::load(&test_generations()).unwrap();
+    for (label, key_id) in [("x25519", 0), ("xwing", 1)] {
+        let client =
+            ClientRequest::from_encoded_config(&key_config_for(&key_ring, key_id)).unwrap();
+        let (valid, _) = client.encapsulate(b"\x00\x03GET").unwrap();
+        let mut wrong_kdf = valid.clone();
+        wrong_kdf[4] ^= 0x03; // KDF 0x0001 -> 0x0002
+        let mut altered_enc = valid.clone();
+        altered_enc[7] ^= 0x01;
+        let mut altered_ct = valid.clone();
+        *altered_ct.last_mut().unwrap() ^= 0x01;
+        let truncated = valid[..valid.len() - 17].to_vec();
+
+        for (case, body) in [
+            ("wrong KDF", wrong_kdf),
+            ("altered enc", altered_enc),
+            ("altered ciphertext", altered_ct),
+            ("truncated", truncated),
+        ] {
+            let app = build_app(vec!["example.invalid".to_string()]);
+            let response = app
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/gateway")
+                        .header("content-type", "message/ohttp-req")
+                        .body(Body::from(body))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                response.status(),
+                StatusCode::BAD_REQUEST,
+                "{label}: {case}"
+            );
+        }
+    }
+}
+
+#[tokio::test]
 async fn forbidden_target_returns_encrypted_403() {
     let target_addr = spawn_target().await;
     let authority = target_addr.to_string();
@@ -663,18 +705,11 @@ async fn decrypt_only_generation_still_decrypts_but_is_not_advertised() {
     // decrypt through it, even though neither is advertised to new clients.
     let mut retired_seed =
         hex::decode("202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f").unwrap();
-    let retired_xwing_config = ohttp::KeyConfig::derive(
-        3,
-        ohttp::hpke::Kem::XWing,
-        vec![ohttp::SymmetricSuite::new(
-            ohttp::hpke::Kdf::HkdfSha256,
-            ohttp::hpke::Aead::Aes128Gcm,
-        )],
-        &retired_seed,
-    )
-    .unwrap()
-    .encode()
-    .unwrap();
+    let retired_xwing_config = oblivious_gateway::xwing::XWingKey::derive(3, &retired_seed)
+        .unwrap()
+        .config()
+        .encode()
+        .unwrap();
     if let Some(last) = retired_seed.last_mut() {
         *last ^= 0xFF;
     }
