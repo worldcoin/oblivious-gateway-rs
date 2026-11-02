@@ -34,5 +34,5 @@ jobs:
       checks: read
     steps:
       - name: Run Security Scorecard
-        uses: worldcoin/gh-actions/security/security-scorecard@8674511860f4d4225ed44c3aa9f6b9c6dd6e8490
+        uses: worldcoin/gh-actions/security/security-scorecard@main
         # More information: https://github.com/worldcoin/gh-actions/tree/main/security/security-scorecard
