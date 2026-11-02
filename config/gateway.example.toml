@@ -42,7 +42,7 @@ allowed_targets = ["api.example.com", "internal.example.com:8443"]
 # generation derives one X25519 key and one X-Wing key from its own master
 # seed - different generations use different, independently generated
 # seeds, never a value derived from another generation's seed. See
-# GLOSSARY.md for why the X25519 key uses a transformed copy of the seed.
+# GLOSSARY.md for why both keys use transformed copies of the seed.
 #
 # `seed` accepts inline hex (local testing only - see below), an
 # environment variable name, or a file path, e.g. `seed = { file = "/run/secrets/..." }`.

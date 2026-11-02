@@ -661,35 +661,29 @@ async fn decrypt_only_generation_still_decrypts_but_is_not_advertised() {
 
     // A client that already holds either retired public config can still
     // decrypt through it, even though neither is advertised to new clients.
+    // Derive both retired configs independently, from Go's inputs: the
+    // seed with its last byte flipped for X25519, and additionally its
+    // second-to-last byte for X-Wing.
+    let suites = || {
+        vec![ohttp::SymmetricSuite::new(
+            ohttp::hpke::Kdf::HkdfSha256,
+            ohttp::hpke::Aead::Aes128Gcm,
+        )]
+    };
     let mut retired_seed =
         hex::decode("202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f").unwrap();
-    let retired_xwing_config = ohttp::KeyConfig::derive(
-        3,
-        ohttp::hpke::Kem::XWing,
-        vec![ohttp::SymmetricSuite::new(
-            ohttp::hpke::Kdf::HkdfSha256,
-            ohttp::hpke::Aead::Aes128Gcm,
-        )],
-        &retired_seed,
-    )
-    .unwrap()
-    .encode()
-    .unwrap();
-    if let Some(last) = retired_seed.last_mut() {
-        *last ^= 0xFF;
-    }
-    let retired_x25519_config = ohttp::KeyConfig::derive(
-        2,
-        ohttp::hpke::Kem::X25519Sha256,
-        vec![ohttp::SymmetricSuite::new(
-            ohttp::hpke::Kdf::HkdfSha256,
-            ohttp::hpke::Aead::Aes128Gcm,
-        )],
-        &retired_seed,
-    )
-    .unwrap()
-    .encode()
-    .unwrap();
+    retired_seed[31] ^= 0xFF;
+    let retired_x25519_config =
+        ohttp::KeyConfig::derive(2, ohttp::hpke::Kem::X25519Sha256, suites(), &retired_seed)
+            .unwrap()
+            .encode()
+            .unwrap();
+    retired_seed[30] ^= 0xFF;
+    let retired_xwing_config =
+        ohttp::KeyConfig::derive(3, ohttp::hpke::Kem::XWing, suites(), &retired_seed)
+            .unwrap()
+            .encode()
+            .unwrap();
 
     let app = build_app_with(key_ring, vec![authority.clone()]);
     for retired_config in [&retired_x25519_config, &retired_xwing_config] {

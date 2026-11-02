@@ -58,12 +58,13 @@ parity from the shared protocol.
   input byte-for-byte, verified against a fixture captured from the Go
   module. Existing encoded client configs also require the same key ID
   and cipher suite; preserving the seed alone is not sufficient.
-- **X-Wing: same key ID, different key.** Go flips the last two seed
-  bytes and derives with CIRCL's `SHAKE256(ikm)` (X-Wing draft). We use
-  the unmodified seed with the `ohttp` crate's labeled `DeriveKeyPair`
+- **X-Wing: same key ID and input, different key.** Both flip the seed's
+  last two bytes before deriving. Go then uses CIRCL's `SHAKE256(ikm)`
+  (X-Wing draft); we use the `ohttp` crate's labeled `DeriveKeyPair`
   (draft-ietf-hpke-pq). Neither draft is final. The same master seed
   therefore yields a different X-Wing key under the same ID, so the two
-  servers cannot decrypt each other's X-Wing requests. This gateway does
+  servers cannot decrypt each other's X-Wing requests. Keys would match
+  if both implementations adopt the same derivation. This gateway does
   not support Go's additional X25519+Kyber768Draft00 KEM.
 - **The allowlist is checked once, against the initial target only.**
   Redirects are followed via the HTTP client's own default policy without

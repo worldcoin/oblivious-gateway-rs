@@ -1,12 +1,12 @@
 //! Key generation loading and the decryption/advertisement key ring.
 //!
-//! Each generation derives its X-Wing key from the operator's master seed
-//! unmodified, and its X25519 key from a copy of that seed with the final
-//! byte `XORed` with `0xff`. This reproduces the Go gateway's legacy X25519
-//! derivation input byte-for-byte, so embedded client configurations that
-//! predate this rewrite keep working when operators reuse the same seed
-//! and key identifier (see GLOSSARY.md). Both KEMs use HKDF-SHA256 +
-//! AES-128-GCM.
+//! Each generation feeds its keys the same inputs as the Go gateway: X25519
+//! derives from a copy of the master seed with the final byte `XORed` with
+//! `0xff`, X-Wing from a copy with the final two bytes flipped. For X25519
+//! this reproduces Go's key byte-for-byte, so embedded client configurations
+//! keep working when operators reuse the same seed and key identifier. For
+//! X-Wing only the input matches; Go's derivation function differs (see
+//! GLOSSARY.md). Both KEMs use HKDF-SHA256 + AES-128-GCM.
 
 use std::sync::Arc;
 
@@ -20,12 +20,13 @@ fn symmetric_suites() -> Vec<SymmetricSuite> {
     vec![SymmetricSuite::new(Kdf::HkdfSha256, Aead::Aes128Gcm)]
 }
 
-/// Copy the seed and flip the final byte, matching the Go gateway's legacy
-/// X25519 derivation input. See module docs above.
-fn x25519_seed_transform(seed: &[u8]) -> Vec<u8> {
+/// Copy the seed and flip its final `count` bytes, matching the Go
+/// gateway's derivation inputs: 1 for X25519, 2 for X-Wing. See module docs
+/// above.
+fn go_seed_transform(seed: &[u8], count: usize) -> Vec<u8> {
     let mut transformed = seed.to_vec();
-    if let Some(last) = transformed.last_mut() {
-        *last ^= 0xFF;
+    for b in transformed.iter_mut().rev().take(count) {
+        *b ^= 0xFF;
     }
     transformed
 }
@@ -68,7 +69,7 @@ impl Generation {
             );
         }
 
-        let x25519_seed = x25519_seed_transform(&seed);
+        let x25519_seed = go_seed_transform(&seed, 1);
         let x25519_config = KeyConfig::derive(
             x25519_key_id,
             Kem::X25519Sha256,
@@ -77,8 +78,10 @@ impl Generation {
         )
         .wrap_err("deriving X25519 key")?;
 
-        let xwing_config = KeyConfig::derive(xwing_key_id, Kem::XWing, symmetric_suites(), &seed)
-            .wrap_err("deriving X-Wing key")?;
+        let xwing_seed = go_seed_transform(&seed, 2);
+        let xwing_config =
+            KeyConfig::derive(xwing_key_id, Kem::XWing, symmetric_suites(), &xwing_seed)
+                .wrap_err("deriving X-Wing key")?;
 
         Ok(Self {
             x25519_key_id,
@@ -235,7 +238,7 @@ mod tests {
         for (i, b) in seed.iter_mut().enumerate() {
             *b = i as u8;
         }
-        let transformed = x25519_seed_transform(&seed);
+        let transformed = go_seed_transform(&seed, 1);
 
         let config =
             KeyConfig::derive(7, Kem::X25519Sha256, symmetric_suites(), &transformed).unwrap();
@@ -245,19 +248,13 @@ mod tests {
     }
 
     #[test]
-    fn seed_transform_flips_only_final_byte() {
+    fn seed_transform_flips_only_the_final_bytes() {
         let seed = vec![0x01u8; 32];
-        let transformed = x25519_seed_transform(&seed);
-        assert_eq!(&transformed[..31], &seed[..31]);
-        assert_eq!(transformed[31], 0x01 ^ 0xFF);
-    }
-
-    #[test]
-    fn xwing_uses_untransformed_seed() {
-        // X-Wing derivation must not apply the X25519-only XOR transform.
-        let seed = vec![0x42u8; 32];
-        let a = KeyConfig::derive(1, Kem::XWing, symmetric_suites(), &seed).unwrap();
-        let b = KeyConfig::derive(1, Kem::XWing, symmetric_suites(), &seed).unwrap();
-        assert_eq!(a.encode().unwrap(), b.encode().unwrap());
+        let one = go_seed_transform(&seed, 1);
+        assert_eq!(&one[..31], &seed[..31]);
+        assert_eq!(one[31], 0x01 ^ 0xFF);
+        let two = go_seed_transform(&seed, 2);
+        assert_eq!(&two[..30], &seed[..30]);
+        assert_eq!(&two[30..], &[0x01 ^ 0xFF; 2]);
     }
 }
