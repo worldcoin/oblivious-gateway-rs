@@ -176,16 +176,17 @@ listen_addr = "127.0.0.1:0"
 [forwarding]
 allowed_targets = ["example.invalid"]
 [[generations]]
-x25519 = { key_id = 0 }
+x25519 = { key_id = 128 }
 seed = { hex = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f" }
 "#,
     );
+    // Go's layout for CONFIGURATION_ID 0: X25519 128, X-Wing 64.
     let config = FileConfig::load(defaulted.path()).unwrap();
-    assert_eq!(config.generations[0].x25519_key_id(), 0);
-    assert_eq!(config.generations[0].xwing_key_id(), 128);
+    assert_eq!(config.generations[0].x25519_key_id(), 128);
+    assert_eq!(config.generations[0].xwing_key_id(), 64);
     assert!(config.generations[0].advertise);
 
-    // x25519 explicit, xwing omitted: xwing still derives from x25519.
+    // The X-Wing default wraps below zero.
     let derived = write_temp(
         r#"
 [server]
@@ -199,7 +200,7 @@ seed = { hex = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f
     );
     let config = FileConfig::load(derived.path()).unwrap();
     assert_eq!(config.generations[0].x25519_key_id(), 5);
-    assert_eq!(config.generations[0].xwing_key_id(), 133);
+    assert_eq!(config.generations[0].xwing_key_id(), 197);
 
     // Both explicit: no defaulting/derivation kicks in at all.
     let explicit = write_temp(
@@ -217,6 +218,37 @@ seed = { hex = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f
     let config = FileConfig::load(explicit.path()).unwrap();
     assert_eq!(config.generations[0].x25519_key_id(), 5);
     assert_eq!(config.generations[0].xwing_key_id(), 200);
+}
+
+#[test]
+fn default_xwing_ids_follow_consecutive_x25519_ids() {
+    let generations = |ids: [u8; 2]| {
+        let mut config = String::from(
+            "[server]\nlisten_addr = \"127.0.0.1:0\"\n[forwarding]\nallowed_targets = [\"example.invalid\"]\n",
+        );
+        for (i, id) in ids.iter().enumerate() {
+            config.push_str(&format!(
+                "[[generations]]\nx25519 = {{ key_id = {id} }}\nseed = {{ hex = \"{}\" }}\n",
+                format!("{i:02x}").repeat(32)
+            ));
+        }
+        write_temp(&config)
+    };
+
+    // Rotating to the next X25519 ID, as Go increments CONFIGURATION_ID.
+    let file = generations([128, 129]);
+    let config = FileConfig::load(file.path()).unwrap();
+    let ids: Vec<_> = config
+        .generations
+        .iter()
+        .map(|g| (g.x25519_key_id(), g.xwing_key_id()))
+        .collect();
+    assert_eq!(ids, [(128, 64), (129, 65)]);
+
+    // X25519 IDs 64 apart collide through the default and fail startup.
+    let file = generations([128, 192]);
+    let err = FileConfig::load(file.path()).unwrap_err();
+    assert!(format!("{err:#}").contains("duplicate key identifier 128"));
 }
 
 #[test]

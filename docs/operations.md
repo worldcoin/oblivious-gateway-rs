@@ -29,7 +29,9 @@ HKDF-SHA256 and AES-128-GCM.
   inline, through an environment variable, or from a file. Use a secret
   manager or protected file outside local testing; never commit seeds.
 - `x25519.key_id`: required, in the range 0–255.
-- `xwing.key_id`: optional; defaults to the X25519 ID + 128, wrapping at 256.
+- `xwing.key_id`: optional; defaults to the X25519 ID − 64, wrapping at 256
+  (Go's layout: X25519 128 and X-Wing 64). Give each new generation the
+  next X25519 ID; IDs 64 apart collide and fail startup.
 - `advertise`: defaults to `true`. Setting it to `false` hides **both**
   public configs but keeps both keys loaded for decryption.
 
