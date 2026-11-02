@@ -1,20 +1,19 @@
 //! Key generation loading and the decryption/advertisement key ring.
 //!
-//! Both keys of a generation reproduce the Go gateway (v0.0.4) byte for
-//! byte from the same master seed: X25519 from the seed with its final
-//! byte `XORed` with `0xff`, X-Wing from the seed with its final two bytes
-//! flipped (see [`crate::xwing`]). Embedded client configurations created
-//! against Go therefore keep working when operators reuse the same seed
-//! and key identifiers (see GLOSSARY.md). Both KEMs use HKDF-SHA256 +
+//! Each generation derives its X-Wing key from the operator's master seed
+//! unmodified, and its X25519 key from a copy of that seed with the final
+//! byte `XORed` with `0xff`. This reproduces the Go gateway's legacy X25519
+//! derivation input byte-for-byte, so embedded client configurations that
+//! predate this rewrite keep working when operators reuse the same seed
+//! and key identifier (see GLOSSARY.md). Both KEMs use HKDF-SHA256 +
 //! AES-128-GCM.
 
 use std::sync::Arc;
 
 use ohttp::hpke::{Aead, Kdf, Kem};
-use ohttp::{KeyConfig, KeyId, Server, ServerResponse, SymmetricSuite};
+use ohttp::{KeyConfig, KeyId, Server, SymmetricSuite};
 
 use crate::config::{GenerationConfig, MIN_SEED_LEN};
-use crate::xwing::{XWingKey, XWingResponse};
 use eyre::{WrapErr, bail};
 
 fn symmetric_suites() -> Vec<SymmetricSuite> {
@@ -42,8 +41,8 @@ pub struct Generation {
     pub advertise: bool,
     /// This generation's X25519 Key Configuration (with private key).
     pub x25519_config: KeyConfig,
-    /// This generation's X-Wing key.
-    pub xwing: XWingKey,
+    /// This generation's X-Wing Key Configuration (with private key).
+    pub xwing_config: KeyConfig,
 }
 
 impl Generation {
@@ -78,70 +77,16 @@ impl Generation {
         )
         .wrap_err("deriving X25519 key")?;
 
-        let xwing = XWingKey::derive(xwing_key_id, &seed).wrap_err("deriving X-Wing key")?;
+        let xwing_config = KeyConfig::derive(xwing_key_id, Kem::XWing, symmetric_suites(), &seed)
+            .wrap_err("deriving X-Wing key")?;
 
         Ok(Self {
             x25519_key_id,
             xwing_key_id,
             advertise: cfg.advertise,
             x25519_config,
-            xwing,
+            xwing_config,
         })
-    }
-}
-
-/// Decryption side of one loaded key.
-#[allow(
-    clippy::large_enum_variant,
-    reason = "one per loaded key, held behind an Arc"
-)]
-pub enum Decapsulator {
-    /// X25519, served by the `ohttp` crate.
-    X25519(Server),
-    /// Go-compatible X-Wing, served by [`crate::xwing`].
-    XWing(XWingKey),
-}
-
-/// Response encryption state returned by [`Decapsulator::decapsulate`].
-pub enum ResponseContext {
-    /// X25519 response.
-    X25519(ServerResponse),
-    /// X-Wing response.
-    XWing(XWingResponse),
-}
-
-impl Decapsulator {
-    /// Decapsulate an Encapsulated Request for this key.
-    ///
-    /// # Errors
-    ///
-    /// Fails if the request is malformed, names another key or suite, or
-    /// does not decrypt.
-    pub fn decapsulate(&self, enc_request: &[u8]) -> eyre::Result<(Vec<u8>, ResponseContext)> {
-        match self {
-            Self::X25519(server) => {
-                let (request, response) = server.decapsulate(enc_request)?;
-                Ok((request, ResponseContext::X25519(response)))
-            }
-            Self::XWing(key) => {
-                let (request, response) = key.decapsulate(enc_request)?;
-                Ok((request, ResponseContext::XWing(response)))
-            }
-        }
-    }
-}
-
-impl ResponseContext {
-    /// Encapsulate the response to the request that produced this context.
-    ///
-    /// # Errors
-    ///
-    /// Fails if response encryption fails.
-    pub fn encapsulate(self, response: &[u8]) -> eyre::Result<Vec<u8>> {
-        match self {
-            Self::X25519(context) => Ok(context.encapsulate(response)?),
-            Self::XWing(context) => context.encapsulate(response),
-        }
     }
 }
 
@@ -153,7 +98,7 @@ struct LoadedKey {
     key_id: KeyId,
     kem: &'static str,
     advertise: bool,
-    server: Arc<Decapsulator>,
+    server: Arc<Server>,
 }
 
 /// The full set of decryption servers plus the currently advertised public
@@ -186,21 +131,25 @@ impl KeyRing {
                 key_id: generation.x25519_key_id,
                 kem: "x25519",
                 advertise: generation.advertise,
-                server: Arc::new(Decapsulator::X25519(
+                server: Arc::new(
                     Server::new(generation.x25519_config.clone())
                         .wrap_err("creating X25519 server")?,
-                )),
+                ),
             });
-            if generation.advertise {
-                advertise_list.push(generation.x25519_config);
-                advertise_list.push(generation.xwing.config().clone());
-            }
             keys.push(LoadedKey {
                 key_id: generation.xwing_key_id,
                 kem: "xwing",
                 advertise: generation.advertise,
-                server: Arc::new(Decapsulator::XWing(generation.xwing)),
+                server: Arc::new(
+                    Server::new(generation.xwing_config.clone())
+                        .wrap_err("creating X-Wing server")?,
+                ),
             });
+
+            if generation.advertise {
+                advertise_list.push(generation.x25519_config);
+                advertise_list.push(generation.xwing_config);
+            }
         }
 
         let advertised_configs =
@@ -231,11 +180,11 @@ impl KeyRing {
     }
 
     /// Look up the decryption server for a request's key identifier. The
-    /// caller has only peeked the identifier; `Decapsulator::decapsulate`
-    /// still independently validates the identifier, KEM and symmetric
-    /// suite carried in the request header.
+    /// caller has only peeked the identifier; `Server::decapsulate` still
+    /// independently validates the identifier, KEM and symmetric suite
+    /// carried in the request header.
     #[must_use]
-    pub fn server_for(&self, key_id: KeyId) -> Option<Arc<Decapsulator>> {
+    pub fn server_for(&self, key_id: KeyId) -> Option<Arc<Server>> {
         self.keys
             .iter()
             .find(|k| k.key_id == key_id)
@@ -301,5 +250,14 @@ mod tests {
         let transformed = x25519_seed_transform(&seed);
         assert_eq!(&transformed[..31], &seed[..31]);
         assert_eq!(transformed[31], 0x01 ^ 0xFF);
+    }
+
+    #[test]
+    fn xwing_uses_untransformed_seed() {
+        // X-Wing derivation must not apply the X25519-only XOR transform.
+        let seed = vec![0x42u8; 32];
+        let a = KeyConfig::derive(1, Kem::XWing, symmetric_suites(), &seed).unwrap();
+        let b = KeyConfig::derive(1, Kem::XWing, symmetric_suites(), &seed).unwrap();
+        assert_eq!(a.encode().unwrap(), b.encode().unwrap());
     }
 }
