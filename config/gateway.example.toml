@@ -9,6 +9,9 @@
 [server]
 listen_addr = "0.0.0.0:8080"
 shutdown_grace_seconds = 30
+# Keep serving this long after SIGTERM before draining, e.g. instead of a
+# Kubernetes preStop sleep (the image has no shell). Defaults to 0.
+# shutdown_delay_seconds = 10
 # Concurrent handlers, not requests/sec. Tune for traffic, latency and memory.
 max_in_flight_requests = 128
 

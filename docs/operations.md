@@ -8,7 +8,7 @@ Invalid configuration fails startup with a structured error and nonzero exit.
 
 | Section | Settings |
 |---|---|
-| `[server]` | Listen address, max_in_flight_requests and shutdown grace period |
+| `[server]` | Listen address, max_in_flight_requests, shutdown delay and grace period |
 | `[server.tls]` | Optional certificate and private-key files |
 | `[metrics]` | Optional separate Prometheus listener |
 | `[forwarding]` | Target allowlist and scheme/host rewrites |
@@ -19,6 +19,11 @@ An allowlist is required unless `--allow-any-target` or
 `OBLIVIOUS_GATEWAY_ALLOW_ANY_TARGET=true` is set. Unrestricted forwarding
 is intended for development only. Command-line flags override environment
 settings. Logging uses `RUST_LOG`, defaulting to `info`.
+
+On SIGTERM the gateway keeps serving for `shutdown_delay_seconds` (default
+0), then drains for up to `shutdown_grace_seconds` (default 30). Behind a
+load balancer, set the delay to cover deregistration, e.g. 10 s instead of a
+Kubernetes `preStop` sleep, which the shell-less image cannot run.
 
 ## Keys
 
