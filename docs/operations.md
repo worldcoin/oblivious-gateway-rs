@@ -86,9 +86,9 @@ The gateway has no replay protection: a resent Encapsulated Request is
 forwarded again. Targets with non-idempotent operations must tolerate or
 reject duplicates themselves (RFC 9458 §6.5).
 
-An allowed target is trusted to redirect elsewhere: redirect destinations
-are not checked against the allowlist. There is no private-address or DNS
-rebinding protection. Enforce network-level egress restrictions as needed.
+Redirects are not followed: a target's 3xx is returned to the client inside
+the encrypted response. There is no private-address or DNS rebinding
+protection. Enforce network-level egress restrictions as needed.
 
 This gateway is not a drop-in replacement for every Go configuration.
 Compare public config entries and test encrypted round trips before
@@ -163,7 +163,7 @@ Timing ends when the handler produces its response; cancelled handlers
 without a response do not emit a completion entry.
 
 The logged `target_host` is the matching configured allowlist entry before
-rewrites/redirects. It is omitted for unlisted hosts and unrestricted
+rewrites. It is omitted for unlisted hosts and unrestricted
 forwarding. Paths, queries, headers, bodies and seeds are not logged;
 nonstandard methods become `OTHER`. Debug logs can be high-volume.
 Debug and trace output from the `ohttp` crate is always suppressed because

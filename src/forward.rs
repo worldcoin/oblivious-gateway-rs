@@ -1,11 +1,10 @@
 //! Outbound forwarding to the Target Resource: allowlisting, scheme/host
 //! rewrites, and the HTTP client used to reach the target.
 //!
-//! The allowlist is checked only against the initial destination; redirects
-//! are followed using the HTTP client's own (finite, default) redirect
-//! handling without re-validating each hop. Operators who allowlist a
-//! target are trusting it to choose subsequent destinations, including
-//! internal ones — see GLOSSARY.md's "Where we differ from the Go reference"
+//! Redirects are never followed: a target's 3xx is returned to the client
+//! as-is, so every destination the gateway connects to is allowlisted. A
+//! client that wants to follow it sends a new request, which is checked
+//! again — see GLOSSARY.md's "Where we differ from the Go reference"
 //! section.
 
 use std::collections::{HashMap, HashSet};
@@ -70,11 +69,11 @@ impl Forwarder {
     /// client with a fixed, always-valid configuration.
     #[must_use]
     pub fn new(config: &ForwardingConfig, allow_any_target: bool) -> Self {
-        // Rely on the client's own default redirect policy (reqwest:
-        // `Policy::limited(10)`, verified against 0.13.5 source) rather than
-        // reimplementing redirect handling. Outbound HTTPS uses reqwest's
-        // normal certificate validation.
+        // Following redirects would connect to destinations the allowlist
+        // never checked. Outbound HTTPS uses reqwest's normal certificate
+        // validation.
         let client = Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
             .connect_timeout(CONNECT_TIMEOUT)
             .timeout(REQUEST_TIMEOUT)
             .build()
