@@ -51,7 +51,7 @@ async fn forwarding_failures_log_categories_without_request_content() {
     let forwarder = Forwarder::new(
         &ForwardingConfig {
             allowed_targets: vec![authority.clone()],
-            rewrites: Default::default(),
+            ..Default::default()
         },
         false,
     );

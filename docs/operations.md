@@ -166,6 +166,14 @@ The logged `target_host` is the matching configured allowlist entry before
 rewrites/redirects. It is omitted for unlisted hosts and unrestricted
 forwarding. Paths, queries, headers, bodies and seeds are not logged;
 nonstandard methods become `OTHER`. Debug logs can be high-volume.
+
+`forwarding.log_forbidden_targets = true` adds a `target forbidden by
+allowlist` warning with the client-supplied `target_host` of each rejected
+request, for finding misconfigured clients or probing. The host is reduced
+to `[A-Za-z0-9._:\[\]-]` (others become `?`) and truncated to 260
+characters. At most 10 warnings are logged per second; `suppressed` counts
+those dropped since the previous one. It is off by default.
+
 Debug and trace output from the `ohttp` crate is always suppressed because
 it includes response encryption keys.
 There is no OpenTelemetry span instrumentation or distributed trace export.
