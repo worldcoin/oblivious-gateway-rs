@@ -425,9 +425,8 @@ async fn unknown_route_is_404() {
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
 
-/// A target that always redirects to `landing_authority`, used to exercise
-/// ADR 0002: the allowlist is checked only on the initial destination, and
-/// the redirect is followed without re-validating it.
+/// A target that always redirects to `landing_authority`, used to check that
+/// the gateway returns the redirect instead of following it.
 async fn spawn_redirecting_target(landing_authority: String) -> SocketAddr {
     use axum::Router;
     use axum::extract::State;
@@ -457,7 +456,7 @@ async fn spawn_redirecting_target(landing_authority: String) -> SocketAddr {
 }
 
 #[tokio::test]
-async fn redirect_target_is_followed_without_reallowlisting() {
+async fn redirect_is_returned_to_client_not_followed() {
     let landing_addr = spawn_target().await;
     let landing_authority = landing_addr.to_string();
     let redirecting_addr = spawn_redirecting_target(landing_authority.clone()).await;
@@ -481,10 +480,13 @@ async fn redirect_target_is_followed_without_reallowlisting() {
 
     let (binary_status, binary_body) = decode_bhttp_response(&response_bytes);
     assert_eq!(
-        binary_status, 200,
-        "the redirect must be followed, not blocked"
+        binary_status, 302,
+        "the redirect must be returned, not followed"
     );
-    assert_eq!(String::from_utf8_lossy(&binary_body), "/landed:");
+    assert!(
+        binary_body.is_empty(),
+        "the landing target must not be reached"
+    );
 }
 
 #[tokio::test]

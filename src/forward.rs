@@ -1,18 +1,14 @@
 //! Outbound forwarding to the Target Resource: allowlisting, scheme/host
 //! rewrites, and the HTTP client used to reach the target.
 //!
-//! The allowlist is checked only against the initial destination; redirects
-//! are followed using the HTTP client's own (finite, default) redirect
-//! handling without re-validating each hop. Operators who allowlist a
-//! target are trusting it to choose subsequent destinations, including
-//! internal ones — see GLOSSARY.md's "Where we differ from the Go reference"
-//! section.
+//! Redirects are never followed: a target's 3xx is returned to the client,
+//! so every destination the gateway contacts is one the allowlist approved.
 
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use axum::http::uri::{Authority, PathAndQuery};
-use reqwest::{Client, Url};
+use reqwest::{Client, Url, redirect};
 
 use crate::bhttp::BinaryHttpRequest;
 use crate::config::{ForwardingConfig, RewriteTarget};
@@ -70,11 +66,10 @@ impl Forwarder {
     /// client with a fixed, always-valid configuration.
     #[must_use]
     pub fn new(config: &ForwardingConfig, allow_any_target: bool) -> Self {
-        // Rely on the client's own default redirect policy (reqwest:
-        // `Policy::limited(10)`, verified against 0.13.5 source) rather than
-        // reimplementing redirect handling. Outbound HTTPS uses reqwest's
-        // normal certificate validation.
+        // Following redirects would bypass the allowlist. Outbound HTTPS uses
+        // reqwest's normal certificate validation.
         let client = Client::builder()
+            .redirect(redirect::Policy::none())
             .connect_timeout(CONNECT_TIMEOUT)
             .timeout(REQUEST_TIMEOUT)
             .build()
