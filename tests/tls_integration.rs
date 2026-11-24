@@ -83,7 +83,7 @@ async fn start_gateway_tls(tls_config: &TlsConfig) -> SocketAddr {
     let forwarder = oblivious_gateway::forward::Forwarder::new(
         &oblivious_gateway::config::ForwardingConfig {
             allowed_targets: vec!["example.invalid".to_string()],
-            rewrites: Default::default(),
+            ..Default::default()
         },
         false,
     );

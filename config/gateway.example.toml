@@ -34,6 +34,10 @@ listen_addr = "127.0.0.1:9090"
 # Required unless the process is started with --allow-any-target.
 allowed_targets = ["api.example.com", "internal.example.com:8443"]
 
+# Optional: follow target redirects, but only to allowlisted hosts or rewrite
+# destinations. Off by default: 3xx responses go back to the client.
+# follow_redirects = false
+
 # Optional scheme/host rewrites applied after the allowlist check, e.g. to
 # route a public hostname to an internal service address. The outbound Host
 # becomes the rewritten destination; the original client Host is not retained.
