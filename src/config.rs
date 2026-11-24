@@ -97,6 +97,10 @@ pub struct ForwardingConfig {
     /// Scheme/host rewrites applied after the allowlist check
     #[serde(default)]
     pub rewrites: std::collections::HashMap<String, RewriteTarget>,
+    /// Follow target redirects whose host is allowlisted or a rewrite
+    /// destination. Off by default: 3xx responses go back to the client.
+    #[serde(default)]
+    pub follow_redirects: bool,
 }
 
 /// One `[forwarding.rewrites]` entry: replace the request's scheme and

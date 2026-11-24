@@ -1,12 +1,10 @@
 //! Outbound forwarding to the Target Resource: allowlisting, scheme/host
 //! rewrites, and the HTTP client used to reach the target.
 //!
-//! The allowlist is checked only against the initial destination; redirects
-//! are followed using the HTTP client's own (finite, default) redirect
-//! handling without re-validating each hop. Operators who allowlist a
-//! target are trusting it to choose subsequent destinations, including
-//! internal ones — see GLOSSARY.md's "Where we differ from the Go reference"
-//! section.
+//! Redirects are off by default: a target's 3xx is returned to the client
+//! as-is. With `forwarding.follow_redirects`, only hops to allowlisted
+//! hosts or rewrite destinations are followed — see GLOSSARY.md's "Where we
+//! differ from the Go reference" section.
 
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
@@ -28,6 +26,8 @@ use crate::error::PayloadError;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_TARGET_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
+/// Same bound as reqwest's default redirect policy.
+const MAX_REDIRECTS: usize = 10;
 
 fn target_url(scheme: &str, authority: &str, path: &str) -> Result<Url, PayloadError> {
     if !scheme.eq_ignore_ascii_case("http") && !scheme.eq_ignore_ascii_case("https") {
@@ -52,6 +52,49 @@ fn target_url(scheme: &str, authority: &str, path: &str) -> Result<Url, PayloadE
     Ok(url)
 }
 
+/// `host[:port]` of a redirect hop, in the same form as allowlist entries.
+fn hop_authority(url: &Url) -> Option<String> {
+    let host = url.host_str()?;
+    Some(match url.port() {
+        Some(port) => format!("{host}:{port}"),
+        None => host.to_string(),
+    })
+}
+
+/// Redirects are off unless `forwarding.follow_redirects` is set. When on,
+/// each hop must be an allowlisted host or a configured rewrite
+/// destination; any other hop stops and its 3xx goes back to the client.
+fn redirect_policy(
+    config: &ForwardingConfig,
+    allowed_targets: Option<&HashSet<String>>,
+) -> reqwest::redirect::Policy {
+    if !config.follow_redirects {
+        return reqwest::redirect::Policy::none();
+    }
+    // `None` only with `--allow-any-target`.
+    let allowed_hops: Option<HashSet<String>> = allowed_targets.map(|allowed| {
+        allowed
+            .iter()
+            .cloned()
+            .chain(config.rewrites.values().map(|rewrite| rewrite.host.clone()))
+            .collect()
+    });
+    reqwest::redirect::Policy::custom(move |attempt| {
+        if attempt.previous().len() >= MAX_REDIRECTS {
+            return attempt.error("too many redirects");
+        }
+        let allowed = match &allowed_hops {
+            None => true,
+            Some(hops) => hop_authority(attempt.url()).is_some_and(|hop| hops.contains(&hop)),
+        };
+        if allowed {
+            attempt.follow()
+        } else {
+            attempt.stop()
+        }
+    })
+}
+
 /// Forwards decapsulated binary HTTP requests to their allowlisted target.
 pub struct Forwarder {
     client: Client,
@@ -70,21 +113,19 @@ impl Forwarder {
     /// client with a fixed, always-valid configuration.
     #[must_use]
     pub fn new(config: &ForwardingConfig, allow_any_target: bool) -> Self {
-        // Rely on the client's own default redirect policy (reqwest:
-        // `Policy::limited(10)`, verified against 0.13.5 source) rather than
-        // reimplementing redirect handling. Outbound HTTPS uses reqwest's
-        // normal certificate validation.
-        let client = Client::builder()
-            .connect_timeout(CONNECT_TIMEOUT)
-            .timeout(REQUEST_TIMEOUT)
-            .build()
-            .expect("reqwest client with default configuration cannot fail to build");
-
-        let allowed_targets = if allow_any_target {
+        let allowed_targets: Option<HashSet<String>> = if allow_any_target {
             None
         } else {
             Some(config.allowed_targets.iter().cloned().collect())
         };
+
+        // Outbound HTTPS uses reqwest's normal certificate validation.
+        let client = Client::builder()
+            .redirect(redirect_policy(config, allowed_targets.as_ref()))
+            .connect_timeout(CONNECT_TIMEOUT)
+            .timeout(REQUEST_TIMEOUT)
+            .build()
+            .expect("reqwest client with default configuration cannot fail to build");
 
         Self {
             client,
@@ -134,7 +175,6 @@ impl Forwarder {
             tracing::warn!(
                 timed_out = err.is_timeout(),
                 is_connect = err.is_connect(),
-                is_redirect = err.is_redirect(),
                 is_request = err.is_request(),
                 "target request failed"
             );
@@ -263,7 +303,7 @@ mod tests {
         let forwarder = Forwarder::new(
             &ForwardingConfig {
                 allowed_targets: vec![authority.clone()],
-                rewrites: Default::default(),
+                ..Default::default()
             },
             false,
         );
@@ -296,7 +336,7 @@ mod tests {
         let forwarder = Forwarder::new(
             &ForwardingConfig {
                 allowed_targets: vec![authority.clone()],
-                rewrites: Default::default(),
+                ..Default::default()
             },
             false,
         );

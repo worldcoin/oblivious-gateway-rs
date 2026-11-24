@@ -66,11 +66,14 @@ parity from the shared protocol.
   servers cannot decrypt each other's X-Wing requests. Keys would match
   if both implementations adopt the same derivation. This gateway does
   not support Go's additional X25519+Kyber768Draft00 KEM.
-- **The allowlist is checked once, against the initial target only.**
-  Redirects are followed via the HTTP client's own default policy without
-  re-checking. An allowed target is trusted to choose where it redirects,
-  including internal addresses. RFC 9458 §6.10 separately recommends exactly this kind
-  of target allowlist, though it says nothing about redirects.
+- **Redirects are off by default and checked when on.** The Go reference
+  follows them with Go's default client policy, without re-checking the
+  allowlist. By default we return the target's 3xx to the client unchanged.
+  With `forwarding.follow_redirects`, each hop must be an allowlisted host
+  or a rewrite destination; otherwise the 3xx goes back to the client. So
+  an allowed target cannot send the gateway to an unlisted address.
+  RFC 9458 §6.10 recommends a target allowlist but says nothing about
+  redirects.
 - **A Key Generation's seed is required; there's no auto-generated
   fallback.** The Go reference generates a random ephemeral seed at
   startup if none is configured. We fail startup instead (`missing field

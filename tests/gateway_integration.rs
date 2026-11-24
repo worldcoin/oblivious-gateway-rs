@@ -83,7 +83,7 @@ fn build_app_with(key_ring: KeyRing, allowed_targets: Vec<String>) -> axum::Rout
         key_ring,
         ForwardingConfig {
             allowed_targets,
-            rewrites: Default::default(),
+            ..Default::default()
         },
     )
 }
@@ -425,9 +425,7 @@ async fn unknown_route_is_404() {
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
 
-/// A target that always redirects to `landing_authority`, used to exercise
-/// ADR 0002: the allowlist is checked only on the initial destination, and
-/// the redirect is followed without re-validating it.
+/// A target that always redirects to `landing_authority`.
 async fn spawn_redirecting_target(landing_authority: String) -> SocketAddr {
     use axum::Router;
     use axum::extract::State;
@@ -457,7 +455,7 @@ async fn spawn_redirecting_target(landing_authority: String) -> SocketAddr {
 }
 
 #[tokio::test]
-async fn redirect_target_is_followed_without_reallowlisting() {
+async fn redirect_is_returned_to_client_not_followed() {
     let landing_addr = spawn_target().await;
     let landing_authority = landing_addr.to_string();
     let redirecting_addr = spawn_redirecting_target(landing_authority.clone()).await;
@@ -479,12 +477,70 @@ async fn redirect_target_is_followed_without_reallowlisting() {
     .await;
     assert_eq!(status, StatusCode::OK);
 
-    let (binary_status, binary_body) = decode_bhttp_response(&response_bytes);
+    let mut cursor = std::io::Cursor::new(&response_bytes);
+    let message = bhttp::Message::read_bhttp(&mut cursor).unwrap();
     assert_eq!(
-        binary_status, 200,
-        "the redirect must be followed, not blocked"
+        message.control().status().unwrap().code(),
+        302,
+        "the redirect must reach the client, not be followed"
     );
-    assert_eq!(String::from_utf8_lossy(&binary_body), "/landed:");
+    let location = message
+        .header()
+        .get(b"location")
+        .expect("Location header is forwarded");
+    assert_eq!(
+        location,
+        format!("http://{landing_authority}/landed").as_bytes()
+    );
+}
+
+/// Sends `GET /start` to a redirecting target with `follow_redirects` on
+/// and returns the inner response status and body.
+async fn follow_redirect_with_allowlist(landing_allowlisted: bool) -> (u16, Vec<u8>) {
+    let landing_authority = spawn_target().await.to_string();
+    let redirecting_authority = spawn_redirecting_target(landing_authority.clone())
+        .await
+        .to_string();
+    let key_ring = KeyRing::load(&test_generations()).unwrap();
+    let x25519_config = key_config_for(&key_ring, 0);
+
+    let mut allowed_targets = vec![redirecting_authority.clone()];
+    if landing_allowlisted {
+        allowed_targets.push(landing_authority);
+    }
+    let app = build_app_with_forwarding(
+        key_ring,
+        ForwardingConfig {
+            allowed_targets,
+            follow_redirects: true,
+            ..Default::default()
+        },
+    );
+    let (status, response_bytes) = encrypted_gateway_request(
+        app,
+        &x25519_config,
+        "GET",
+        "/start",
+        b"",
+        &redirecting_authority,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    decode_bhttp_response(&response_bytes)
+}
+
+#[tokio::test]
+async fn enabled_redirects_follow_allowlisted_hops() {
+    let (status, body) = follow_redirect_with_allowlist(true).await;
+    assert_eq!(status, 200);
+    assert_eq!(String::from_utf8_lossy(&body), "/landed:");
+}
+
+#[tokio::test]
+async fn enabled_redirects_stop_at_unlisted_hops() {
+    let (status, body) = follow_redirect_with_allowlist(false).await;
+    assert_eq!(status, 302, "unlisted hop must not be followed");
+    assert_ne!(String::from_utf8_lossy(&body), "/landed:");
 }
 
 #[tokio::test]
@@ -512,6 +568,7 @@ async fn crafted_path_cannot_bypass_allowlist_or_override_rewrite() {
                 ForwardingConfig {
                     allowed_targets: vec![authority.to_string()],
                     rewrites,
+                    ..Default::default()
                 },
             );
             let (outer_status, response) = encrypted_gateway_request(
@@ -608,6 +665,7 @@ async fn rewrite_routes_request_to_configured_target() {
         ForwardingConfig {
             allowed_targets: vec!["public.example.invalid".to_string()],
             rewrites,
+            ..Default::default()
         },
     );
 
@@ -835,7 +893,7 @@ async fn assert_admission_limit(limit: usize) {
             forwarder: Forwarder::new(
                 &ForwardingConfig {
                     allowed_targets: vec![authority.clone()],
-                    rewrites: Default::default(),
+                    ..Default::default()
                 },
                 false,
             ),
