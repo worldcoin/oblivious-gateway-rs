@@ -133,7 +133,6 @@ impl Forwarder {
             tracing::warn!(
                 timed_out = err.is_timeout(),
                 is_connect = err.is_connect(),
-                is_redirect = err.is_redirect(),
                 is_request = err.is_request(),
                 "target request failed"
             );
