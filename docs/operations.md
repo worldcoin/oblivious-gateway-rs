@@ -172,8 +172,12 @@ allowlist` warning with the client-supplied `requested_host` of each rejected
 request, for finding misconfigured clients or probing. The host is reduced
 to `[A-Za-z0-9._:\[\]-]` (others become `?`) and truncated to 260
 characters. At most 10 warnings are logged per second; `suppressed` counts
-those dropped since the previous one. It is off by default. The field is
-not `target_host`, so that field only ever holds allowlisted hosts.
+those dropped since the previous one, so the count for a burst only appears
+with the next logged warning. The limit is shared by all clients, so a
+client sending many forbidden requests can crowd out others: treat the
+warnings as a sample and use
+`ohttp_gateway_requests_total{outcome="request_forbidden"}` for counts. It is off by default. The field is not `target_host`, so that
+field only ever holds allowlisted hosts.
 
 Debug and trace output from the `ohttp` crate is always suppressed because
 it includes response encryption keys.
