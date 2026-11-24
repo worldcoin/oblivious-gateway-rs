@@ -166,7 +166,7 @@ impl Forwarder {
         };
         if let Some(suppressed) = limiter.admit() {
             tracing::warn!(
-                target_host = loggable_authority(authority),
+                requested_host = loggable_authority(authority),
                 suppressed,
                 "target forbidden by allowlist"
             );

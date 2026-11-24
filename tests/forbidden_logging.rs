@@ -88,10 +88,12 @@ async fn forbidden_target_is_logged_sanitized_without_request_content() {
 
     assert_eq!(logs.len(), 3, "{logs:?}");
     assert!(logs[0].contains("\"level\":\"WARN\""), "{}", logs[0]);
-    assert!(logs[0].contains("\"target_host\":\"probe.example:8080\""));
-    assert!(logs[1].contains("\"target_host\":\"evil?host??json?\""));
-    assert!(logs[2].contains(&format!("\"target_host\":\"{}\"", "a".repeat(260))));
+    assert!(logs[0].contains("\"requested_host\":\"probe.example:8080\""));
+    assert!(logs[1].contains("\"requested_host\":\"evil?host??json?\""));
+    assert!(logs[2].contains(&format!("\"requested_host\":\"{}\"", "a".repeat(260))));
     assert!(!logs[2].contains(&"a".repeat(261)));
+    // `target_host` is reserved for allowlisted, operator-configured hosts.
+    assert!(!logs.join("\n").contains("\"target_host\""));
     for secret in ["secret-path", "secret-query", "secret-body"] {
         assert!(!logs.join("\n").contains(secret), "leaked {secret}");
     }
