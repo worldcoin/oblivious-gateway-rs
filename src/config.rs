@@ -97,6 +97,10 @@ pub struct ForwardingConfig {
     /// Scheme/host rewrites applied after the allowlist check
     #[serde(default)]
     pub rewrites: std::collections::HashMap<String, RewriteTarget>,
+    /// Warn-log the host of each forbidden request, sanitized and
+    /// rate-limited. Off by default because the host is client-supplied.
+    #[serde(default)]
+    pub log_forbidden_targets: bool,
 }
 
 /// One `[forwarding.rewrites]` entry: replace the request's scheme and

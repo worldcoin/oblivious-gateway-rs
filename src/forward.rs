@@ -9,7 +9,8 @@
 //! section.
 
 use std::collections::{HashMap, HashSet};
-use std::time::Duration;
+use std::sync::{Mutex, PoisonError};
+use std::time::{Duration, Instant};
 
 use axum::http::uri::{Authority, PathAndQuery};
 use reqwest::{Client, Url};
@@ -28,6 +29,69 @@ use crate::error::PayloadError;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_TARGET_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
+
+/// A flood of forbidden requests must not become a flood of log lines.
+const FORBIDDEN_LOG_LIMIT: u32 = 10;
+const FORBIDDEN_LOG_WINDOW: Duration = Duration::from_secs(1);
+/// DNS names are at most 253 characters; leave room for `:port`.
+const MAX_LOGGED_AUTHORITY_CHARS: usize = 260;
+
+/// Client-supplied authority reduced to host-name characters, so it can't
+/// smuggle arbitrary text (or long payloads) into logs.
+fn loggable_authority(authority: &str) -> String {
+    authority
+        .chars()
+        .take(MAX_LOGGED_AUTHORITY_CHARS)
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | ':' | '[' | ']') {
+                c
+            } else {
+                '?'
+            }
+        })
+        .collect()
+}
+
+/// Fixed-window limiter for forbidden-target warnings.
+struct ForbiddenLogLimiter {
+    state: Mutex<ForbiddenLogState>,
+}
+
+struct ForbiddenLogState {
+    window_start: Instant,
+    logged: u32,
+    suppressed: u64,
+}
+
+impl ForbiddenLogLimiter {
+    fn new() -> Self {
+        Self {
+            state: Mutex::new(ForbiddenLogState {
+                window_start: Instant::now(),
+                logged: 0,
+                suppressed: 0,
+            }),
+        }
+    }
+
+    /// `Some(n)` if this event may be logged, where `n` is how many were
+    /// dropped since the last logged one; `None` if it must be dropped.
+    fn admit(&self) -> Option<u64> {
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let now = Instant::now();
+        if now.duration_since(state.window_start) >= FORBIDDEN_LOG_WINDOW {
+            state.window_start = now;
+            state.logged = 0;
+        }
+        if state.logged < FORBIDDEN_LOG_LIMIT {
+            state.logged += 1;
+            Some(std::mem::take(&mut state.suppressed))
+        } else {
+            state.suppressed += 1;
+            None
+        }
+    }
+}
 
 fn target_url(scheme: &str, authority: &str, path: &str) -> Result<Url, PayloadError> {
     if !scheme.eq_ignore_ascii_case("http") && !scheme.eq_ignore_ascii_case("https") {
@@ -57,6 +121,8 @@ pub struct Forwarder {
     client: Client,
     allowed_targets: Option<HashSet<String>>,
     rewrites: HashMap<String, RewriteTarget>,
+    /// Set when `forwarding.log_forbidden_targets` is enabled.
+    forbidden_log: Option<ForbiddenLogLimiter>,
 }
 
 impl Forwarder {
@@ -90,6 +156,20 @@ impl Forwarder {
             client,
             allowed_targets,
             rewrites: config.rewrites.clone(),
+            forbidden_log: config.log_forbidden_targets.then(ForbiddenLogLimiter::new),
+        }
+    }
+
+    fn log_forbidden(&self, authority: &str) {
+        let Some(limiter) = &self.forbidden_log else {
+            return;
+        };
+        if let Some(suppressed) = limiter.admit() {
+            tracing::warn!(
+                requested_host = loggable_authority(authority),
+                suppressed,
+                "target forbidden by allowlist"
+            );
         }
     }
 
@@ -107,6 +187,7 @@ impl Forwarder {
         if let Some(allowed) = &self.allowed_targets
             && !allowed.contains(&request.authority)
         {
+            self.log_forbidden(&request.authority);
             return Err(PayloadError::Forbidden);
         }
 
@@ -263,7 +344,7 @@ mod tests {
         let forwarder = Forwarder::new(
             &ForwardingConfig {
                 allowed_targets: vec![authority.clone()],
-                rewrites: Default::default(),
+                ..Default::default()
             },
             false,
         );
@@ -296,7 +377,7 @@ mod tests {
         let forwarder = Forwarder::new(
             &ForwardingConfig {
                 allowed_targets: vec![authority.clone()],
-                rewrites: Default::default(),
+                ..Default::default()
             },
             false,
         );

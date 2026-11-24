@@ -83,7 +83,7 @@ fn build_app_with(key_ring: KeyRing, allowed_targets: Vec<String>) -> axum::Rout
         key_ring,
         ForwardingConfig {
             allowed_targets,
-            rewrites: Default::default(),
+            ..Default::default()
         },
     )
 }
@@ -512,6 +512,7 @@ async fn crafted_path_cannot_bypass_allowlist_or_override_rewrite() {
                 ForwardingConfig {
                     allowed_targets: vec![authority.to_string()],
                     rewrites,
+                    ..Default::default()
                 },
             );
             let (outer_status, response) = encrypted_gateway_request(
@@ -608,6 +609,7 @@ async fn rewrite_routes_request_to_configured_target() {
         ForwardingConfig {
             allowed_targets: vec!["public.example.invalid".to_string()],
             rewrites,
+            ..Default::default()
         },
     );
 
@@ -835,7 +837,7 @@ async fn assert_admission_limit(limit: usize) {
             forwarder: Forwarder::new(
                 &ForwardingConfig {
                     allowed_targets: vec![authority.clone()],
-                    rewrites: Default::default(),
+                    ..Default::default()
                 },
                 false,
             ),
