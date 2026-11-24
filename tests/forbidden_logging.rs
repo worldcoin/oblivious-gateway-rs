@@ -37,9 +37,9 @@ fn request(authority: &str) -> BinaryHttpRequest {
         method: reqwest::Method::GET,
         scheme: "https".into(),
         authority: authority.into(),
-        path: "/secret-path?token=secret-query".into(),
+        path: "/marker-path?token=marker-query".into(),
         headers: Default::default(),
-        body: b"secret-body".to_vec(),
+        body: b"marker-body".to_vec(),
     }
 }
 
@@ -94,8 +94,9 @@ async fn forbidden_target_is_logged_sanitized_without_request_content() {
     assert!(!logs[2].contains(&"a".repeat(261)));
     // `target_host` is reserved for allowlisted, operator-configured hosts.
     assert!(!logs.join("\n").contains("\"target_host\""));
-    for secret in ["secret-path", "secret-query", "secret-body"] {
-        assert!(!logs.join("\n").contains(secret), "leaked {secret}");
+    let joined = logs.join("\n");
+    for marker in ["marker-path", "marker-query", "marker-body"] {
+        assert!(!joined.contains(marker), "request content in log");
     }
 }
 
